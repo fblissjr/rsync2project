@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 type options struct {
 	dryRun        bool
@@ -20,8 +20,10 @@ type options struct {
 	listDests     bool
 	showVersion   bool
 	contents      bool
+	saveConfig    bool
 	destName      string
 	extraExcludes stringSlice
+	extraIncludes stringSlice
 }
 
 type stringSlice []string
@@ -75,6 +77,21 @@ func main() {
 	excludes = append(excludes, opts.extraExcludes...)
 	excludes = dedupe(excludes)
 
+	repoCfg, err := loadRepoConfig(absSource)
+	if err != nil {
+		fail(err)
+	}
+	includes := append([]string{}, repoCfg.includes...)
+	includes = append(includes, expandIncludePatterns(opts.extraIncludes)...)
+	includes = dedupe(includes)
+
+	if opts.saveConfig {
+		if err := saveRepoConfig(absSource, repoCfg, opts.destName, opts.extraIncludes); err != nil {
+			fail(err)
+		}
+		fmt.Fprintf(os.Stderr, "saved: %s\n", repoConfigPath(absSource))
+	}
+
 	if opts.showExcludes {
 		fmt.Printf("Source:       %s\n", absSource)
 		if len(types) > 0 {
@@ -84,6 +101,12 @@ func main() {
 		}
 		fmt.Printf("Gitignore:    %v\n", !opts.noGitignore)
 		fmt.Printf("Exclude .git: %v\n", opts.excludeVCS)
+		if len(includes) > 0 {
+			fmt.Printf("Includes (%d):\n", len(includes))
+			for _, i := range includes {
+				fmt.Println("  " + i)
+			}
+		}
 		fmt.Printf("Excludes (%d):\n", len(excludes))
 		for _, e := range excludes {
 			fmt.Println("  " + e)
@@ -91,12 +114,12 @@ func main() {
 		return
 	}
 
-	destination, err := resolveDestArg(opts, args)
+	destination, err := resolveDest(opts, args, repoCfg.dest)
 	if err != nil {
 		fail(err)
 	}
 
-	if err := runRsync(absSource, destination, excludes, opts); err != nil {
+	if err := runRsync(absSource, destination, includes, excludes, opts); err != nil {
 		fail(err)
 	}
 }
@@ -112,29 +135,39 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
 	flag.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
+	flag.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to <source>/.rsync2project for reuse")
 	flag.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
 	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.StringVar(&opts.destName, "dest", "", "named destination from ~/.config/rsync2project/destinations")
 	flag.StringVar(&opts.destName, "d", "", "")
 	flag.Var(&opts.extraExcludes, "extra", "additional exclude pattern (repeatable)")
+	flag.Var(&opts.extraIncludes, "include", "include pattern that overrides .gitignore/excludes (repeatable)")
 
 	flag.Usage = usage
 	flag.Parse()
 	return opts
 }
 
-func resolveDestArg(opts *options, args []string) (string, error) {
+// resolveDest picks a destination using priority: explicit --dest, explicit
+// positional, then the default from the repo config (if any). If --dest is
+// empty and there's no positional, a repo-configured dest acts as the
+// "remembered" target so repeat syncs become a one-arg command.
+func resolveDest(opts *options, args []string, repoDefault string) (string, error) {
+	name := opts.destName
+	if name == "" && len(args) < 2 && repoDefault != "" {
+		name = repoDefault
+	}
 	switch {
-	case opts.destName != "":
+	case name != "":
 		if len(args) > 1 {
-			return "", fmt.Errorf("cannot supply both --dest and a positional destination")
+			return "", fmt.Errorf("cannot supply both --dest/repo-config dest and a positional destination")
 		}
-		return resolveDestination(opts.destName)
+		return resolveDestination(name)
 	case len(args) >= 2:
 		return args[1], nil
 	default:
-		return "", fmt.Errorf("destination required (positional argument or --dest NAME)")
+		return "", fmt.Errorf("destination required (positional, --dest NAME, or 'dest = NAME' in repo config)")
 	}
 }
 
@@ -164,6 +197,8 @@ Options:
       --contents        Copy source contents into dest (don't nest by source name)
       --show-excludes   Print exclude list and exit
       --extra PATTERN   Additional exclude pattern (repeatable)
+      --include PATTERN Re-include a path that .gitignore/excludes would drop (repeatable)
+      --save-config     Persist current --dest and --include flags to <source>/.rsync2project
   -d, --dest NAME       Named destination from config file
       --list-dests      List configured destinations and exit
       --version         Print version

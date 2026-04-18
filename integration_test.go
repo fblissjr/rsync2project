@@ -54,7 +54,7 @@ func TestIntegrationSyncDefault(t *testing.T) {
 	opts := &options{}
 	excludes := buildExcludes(types, opts.excludeVCS)
 
-	if err := runRsync(src, dst+"/", excludes, opts); err != nil {
+	if err := runRsync(src, dst+"/", nil, excludes, opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestIntegrationContents(t *testing.T) {
 	dst := t.TempDir()
 
 	opts := &options{contents: true}
-	if err := runRsync(src, dst+"/", nil, opts); err != nil {
+	if err := runRsync(src, dst+"/", nil, nil, opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -105,5 +105,94 @@ func TestIntegrationContents(t *testing.T) {
 	nested := filepath.Join(dst, "testproj")
 	if _, err := os.Stat(nested); err == nil {
 		t.Errorf("did not expect nested dir %s with --contents, but it exists", nested)
+	}
+}
+
+// TestIntegrationRepoIncludeBeatsGitignore simulates the real case: a
+// directory is gitignored because it doesn't belong on GitHub, but the user
+// wants it copied to a personal backup destination. A repo config file at
+// ~/.config/rsync2project/repos/<basename>.conf re-includes it, while
+// baseline regenerable excludes still fire.
+func TestIntegrationRepoIncludeBeatsGitignore(t *testing.T) {
+	requireRsync(t)
+
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	src := setupFakeProject(t, map[string]string{
+		"pyproject.toml":     "[project]\nname=\"x\"\n",
+		".gitignore":         "models/\ninternal/\n.venv/\n",
+		"main.py":            "print('hi')\n",
+		"models/weights.bin": "fake weights",
+		"internal/notes.md":  "private\n",
+		".venv/bin/python":   "regenerable",
+		"__pycache__/a.pyc":  "regenerable",
+	})
+	dst := t.TempDir()
+
+	// Simulate the "configure once, run many times" workflow: save a repo
+	// config that re-includes models/ and internal/, then reload and run.
+	if err := saveRepoConfig(src, &repoConfig{}, "", []string{"models/", "internal/"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadRepoConfig(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excludes := buildExcludes(detectProjectTypes(src), false)
+
+	if err := runRsync(src, dst+"/", cfg.includes, excludes, &options{}); err != nil {
+		t.Fatalf("runRsync: %v", err)
+	}
+
+	nest := filepath.Join(dst, "testproj")
+
+	mustExist := []string{
+		"main.py",
+		"models/weights.bin",
+		"internal/notes.md",
+	}
+	mustMiss := []string{
+		".venv",
+		"__pycache__",
+	}
+	for _, rel := range mustExist {
+		if _, err := os.Stat(filepath.Join(nest, rel)); err != nil {
+			t.Errorf("expected %s to be copied (re-included), stat error: %v", rel, err)
+		}
+	}
+	for _, rel := range mustMiss {
+		if _, err := os.Stat(filepath.Join(nest, rel)); err == nil {
+			t.Errorf("expected %s to be excluded as regenerable, but it exists", rel)
+		} else if !os.IsNotExist(err) {
+			t.Errorf("unexpected error checking %s: %v", rel, err)
+		}
+	}
+}
+
+// TestRepoConfigRoundTrip verifies save→load produces equivalent config.
+func TestRepoConfigRoundTrip(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	src := filepath.Join(t.TempDir(), "myproj")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := saveRepoConfig(src, &repoConfig{}, "nas", []string{"internal/", "models/weights.bin"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadRepoConfig(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.dest != "nas" {
+		t.Errorf("dest=%q, want nas", cfg.dest)
+	}
+	// internal/ auto-expands to internal/ + internal/***
+	// models/weights.bin stays as-is (no trailing slash)
+	// -> 3 expanded includes total
+	if len(cfg.includes) != 3 {
+		t.Errorf("includes=%v, want 3 entries", cfg.includes)
 	}
 }

@@ -8,7 +8,7 @@ import (
 )
 
 // runRsync builds the rsync argv and execs it, streaming stdio to the user.
-func runRsync(source, destination string, excludes []string, opts *options) error {
+func runRsync(source, destination string, includes, excludes []string, opts *options) error {
 	if _, err := exec.LookPath("rsync"); err != nil {
 		return fmt.Errorf("rsync not found on PATH; please install rsync")
 	}
@@ -31,6 +31,12 @@ func runRsync(source, destination string, excludes []string, opts *options) erro
 		// existing .venv on the destination just because our exclude list
 		// grew since the last sync.
 		args = append(args, "--delete")
+	}
+	// Includes must precede the gitignore filter and the baseline excludes
+	// because rsync is first-match-wins. Anything matched here survives any
+	// subsequent exclude/gitignore rule.
+	for _, i := range includes {
+		args = append(args, "--include="+i)
 	}
 	if !opts.noGitignore {
 		args = append(args, "--filter=:- .gitignore")

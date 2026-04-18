@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0]
+
+### Added
+- Per-repo config at `~/.config/rsync2project/repos/<basename>.conf`, stored centrally (not in the source tree — no risk of accidentally committing it). Supports:
+  - `dest = NAME` directive: pins a default destination for this repo, so repeat syncs become `rsync2project <source>` with no other flags.
+  - Non-comment lines are rsync include patterns that override `.gitignore` and baseline excludes. Trailing `/` on a pattern auto-expands to include directory contents (`X/` + `X/***`).
+- `--include PATTERN` CLI flag (repeatable): one-off re-include of a path that `.gitignore` or the baseline excludes would otherwise drop.
+- `--save-config` flag: writes the current `--dest` and `--include` choices to the repo config file, merging with any existing contents. Intended workflow: experiment with flags, then `--save-config` once the combination is right, then re-run with no flags forever after.
+
+### Changed
+- Destination priority is now: explicit `--dest` > positional > repo config `dest = ...`. Explicit flags always win.
+- `--show-excludes` now also prints any active re-include patterns alongside excludes.
+
 ## [0.3.0]
 
 ### Changed
