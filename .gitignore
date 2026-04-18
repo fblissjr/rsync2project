@@ -1,0 +1,11 @@
+# Built binary
+/rsync2project
+
+# Go build output
+*.out
+*.test
+
+# OS / editor
+.DS_Store
+*.swp
+*~
