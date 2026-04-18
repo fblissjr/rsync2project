@@ -24,6 +24,9 @@ Flags: `-n`, `-v`, `--delete`, `--no-gitignore`, `--no-vcs`,
 `--save-config`, `-d/--dest NAME`, `--contents`, `--list-dests`,
 `--version`.
 
+Subcommands: `dest`, `repo`, `config path` — see sections below or
+`rsync2project <subcmd> --help`.
+
 By default the source directory is preserved at the destination (rsync's
 native behavior). `rsync2project ~/code/myapp /backup/` creates
 `/backup/myapp/`. Pass `--contents` to spill the source's files directly
