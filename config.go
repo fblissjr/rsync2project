@@ -248,6 +248,168 @@ func saveRepoConfig(source string, existing *repoConfig, newDest string, newIncl
 	return nil
 }
 
+// upsertDestination writes name=value into the destinations file. If the
+// name is already present, its value is replaced in place (preserving
+// position, surrounding comments, and blank lines); otherwise a new line
+// is appended. Returns true if a new entry was added, false if an
+// existing one was updated. Creates the config dir if needed.
+func upsertDestination(name, value string) (added bool, err error) {
+	if err := validateDestName(name); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(value) == "" {
+		return false, fmt.Errorf("destination value must not be empty")
+	}
+
+	path := destinationsPath()
+	lines, err := readLines(path)
+	if err != nil {
+		return false, err
+	}
+
+	newLine := name + "=" + value
+	replaced := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		k, _, ok := strings.Cut(trimmed, "=")
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(k) == name {
+			lines[i] = newLine
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		lines = append(lines, newLine)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	if err := writeLinesAtomic(path, lines); err != nil {
+		return false, err
+	}
+	return !replaced, nil
+}
+
+// removeDestination deletes the entry for name. Returns a "not found"
+// error if no such entry exists. Surrounding comments and blank lines
+// are preserved.
+func removeDestination(name string) error {
+	if err := validateDestName(name); err != nil {
+		return err
+	}
+
+	path := destinationsPath()
+	lines, err := readLines(path)
+	if err != nil {
+		return err
+	}
+
+	removed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			out = append(out, line)
+			continue
+		}
+		k, _, ok := strings.Cut(trimmed, "=")
+		if ok && strings.TrimSpace(k) == name {
+			removed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	if !removed {
+		return fmt.Errorf("no destination named %q", name)
+	}
+	return writeLinesAtomic(path, out)
+}
+
+func validateDestName(name string) error {
+	if name == "" {
+		return fmt.Errorf("destination name must not be empty")
+	}
+	if strings.ContainsAny(name, "= \t\n") {
+		return fmt.Errorf("destination name %q must not contain '=' or whitespace", name)
+	}
+	return nil
+}
+
+// readLines returns the file's lines without trailing newlines. A missing
+// file yields an empty slice (not an error), so callers can upsert into a
+// fresh config.
+func readLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
+	return lines, sc.Err()
+}
+
+// writeLinesAtomic writes lines (newline-terminated) to path via a temp
+// file + rename so a crash mid-write can't leave the config truncated.
+func writeLinesAtomic(path string, lines []string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+
+	w := bufio.NewWriter(tmp)
+	for _, line := range lines {
+		if _, err := w.WriteString(line); err != nil {
+			tmp.Close()
+			cleanup()
+			return err
+		}
+		if err := w.WriteByte('\n'); err != nil {
+			tmp.Close()
+			cleanup()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	// Sync before rename: a crash between close and rename could otherwise
+	// publish a zero-length or torn tmp file under the target name.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
 // expandIncludePatterns strips an optional leading '+ ' (rsync's native
 // include marker) and auto-expands directory-style patterns (trailing '/')
 // into both "X/" and "X/***" so the directory AND its contents survive any

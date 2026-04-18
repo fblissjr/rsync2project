@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0]
+
+### Added
+- Subcommand layer. Existing flag-style invocations are unaffected; dispatch for known subcommands runs ahead of top-level flag parsing so each subcommand owns its own flags.
+- `rsync2project dest` — manage `~/.config/rsync2project/destinations` without hand-editing:
+  - `dest` / `dest list` — list destinations (same output as `--list-dests`).
+  - `dest add NAME VALUE` — add or update. Existing entries are replaced in place, preserving comments and surrounding lines; new entries are appended. Writes atomically via tmpfile + fsync + rename.
+  - `dest rm NAME` — remove an entry. Errors if the name is unknown.
+- `rsync2project repo` — inspect and clean up per-repo configs in `~/.config/rsync2project/repos/`:
+  - `repo` / `repo list` — list saved repo configs with their source paths (read from each file's `# source:` header).
+  - `repo show NAME|PATH` — print a repo config file.
+  - `repo rm NAME|PATH` — remove a repo config file.
+  - `repo path [NAME|PATH]` — print the repos directory or a specific config file path.
+  - Saving stays on `--save-config` because it needs a live sync invocation for its context.
+- `rsync2project config path` — print the config directory (`$XDG_CONFIG_HOME/rsync2project` or `~/.config/rsync2project`) for scripting and quick `cd`.
+- Each mutating subcommand accepts `-n` / `--dry-run` to preview without writing, matching the project-wide "`-n` means zero side effects" convention.
+
 ## [0.4.1]
 
 ### Fixed

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const version = "0.4.1"
+const version = "0.5.0"
 
 type options struct {
 	dryRun        bool
@@ -35,6 +35,20 @@ func (s *stringSlice) Set(v string) error {
 }
 
 func main() {
+	// Subcommand dispatch happens before flag parsing so the subcommand
+	// owns its own flags (e.g., `dest add -n NAME VALUE` should dry-run
+	// the write, not be rejected as an unknown top-level flag).
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "dest":
+			os.Exit(runDestCmd(os.Args[2:]))
+		case "repo":
+			os.Exit(runRepoCmd(os.Args[2:]))
+		case "config":
+			os.Exit(runConfigCmd(os.Args[2:]))
+		}
+	}
+
 	opts := parseFlags()
 
 	if opts.showVersion {
@@ -216,10 +230,16 @@ Options:
       --version         Print version
   -h, --help            Show this help
 
+Subcommands:
+  dest                  Manage named destinations (see 'rsync2project dest --help')
+  repo                  Inspect/remove per-repo configs (see 'rsync2project repo --help')
+  config path           Print the rsync2project config directory
+
 Examples:
   rsync2project ~/code/myapp user@host:/path/
   rsync2project --dest name ~/code/myapp
   rsync2project -n --show-excludes ~/code/myapp
+  rsync2project dest add mac fred@mac.local:/Users/fred/backup/
 `)
 }
 

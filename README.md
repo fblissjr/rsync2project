@@ -31,11 +31,33 @@ into the destination without the intermediate directory.
 
 ### Named destinations
 
-Create `~/.config/rsync2project/destinations`, one `name=target` per line:
+Add a destination from the CLI:
+
+    rsync2project dest add mac fred@mac.local:/Users/fred/backup/
+
+Then `--dest mac` (or `-d mac`). Other `dest` subcommands:
+
+    rsync2project dest              # list (same as --list-dests)
+    rsync2project dest add NAME VAL # add or update
+    rsync2project dest rm NAME      # remove
+    rsync2project dest add -n ...   # dry-run; prints what would be written
+
+These edit `~/.config/rsync2project/destinations` in place, preserving
+comments. You can also hand-edit the file directly — one `name=target`
+per line:
 
     name=user@host:/path/
 
-Then `--dest name`.
+### Inspecting or cleaning up per-repo configs
+
+    rsync2project repo              # list saved repo configs
+    rsync2project repo show myapp   # print one
+    rsync2project repo rm myapp     # delete one
+    rsync2project repo path myapp   # print its file path
+    rsync2project config path       # print the config dir
+
+Saving per-repo config still goes through `--save-config` on a sync
+invocation — see the next section.
 
 ### Per-repo config (persist your settings)
 
