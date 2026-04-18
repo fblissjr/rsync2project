@@ -42,12 +42,14 @@ func runRsync(source, destination string, excludes []string, opts *options) erro
 		args = append(args, "--exclude="+e)
 	}
 
-	// Default: treat source as "copy its contents" by appending a trailing
-	// slash. --keep-name passes the source through as-is, which nests the
-	// source dir under the destination (standard rsync "no trailing slash"
-	// semantics).
+	// Default: pass the source through as-is, so rsync's native "no trailing
+	// slash" semantics nest the source directory under the destination. This
+	// matches the common "back up each project into a parent dir" intent.
+	// --contents appends a trailing slash to spill the source's contents
+	// directly into the destination, which is what you want when the
+	// destination path already names the target project (e.g. a dev mirror).
 	src := source
-	if !opts.keepName && !strings.HasSuffix(src, "/") {
+	if opts.contents && !strings.HasSuffix(src, "/") {
 		src += "/"
 	}
 	args = append(args, src, destination)

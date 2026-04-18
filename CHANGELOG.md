@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0]
+
+### Changed
+- **Breaking:** default path semantic flipped to match rsync's native behavior. The source directory is now preserved at the destination (nested under its own name) by default, instead of having its contents spilled directly into the destination. `rsync2project ~/code/myapp /backup/` now creates `/backup/myapp/` rather than `/backup/{main.go, ...}`.
+- The `--keep-name` flag is removed. Its behavior is now the default.
+
+### Added
+- `--contents` flag to opt into the old "spill source contents directly into destination" behavior, for cases where the destination path already names the target (e.g. a dev mirror `ubuntu:~/code/myapp/`) or where you want to rename at the destination.
+- `build/` and `dist/` added to the project-type excludes for detected Python projects.
+
 ## [0.2.0]
 
 ### Added

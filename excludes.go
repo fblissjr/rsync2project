@@ -69,6 +69,7 @@ var vcsExclude = []string{
 // them unconditionally (e.g. bin/ is a build dir for .NET but may be source
 // code for other projects).
 var projectTypeExcludes = map[string][]string{
+	"python": {"build/", "dist/"},
 	"dotnet": {"bin/", "obj/"},
 	"xcode": {
 		"DerivedData/",

@@ -20,12 +20,13 @@ Or `go build -o rsync2project .` and drop the binary on your `PATH`.
     rsync2project -n --show-excludes <source>
 
 Flags: `-n`, `-v`, `--delete`, `--no-gitignore`, `--no-vcs`,
-`--show-excludes`, `--extra PATTERN`, `-d/--dest NAME`, `--keep-name`,
+`--show-excludes`, `--extra PATTERN`, `-d/--dest NAME`, `--contents`,
 `--list-dests`, `--version`.
 
-A trailing slash is appended to the source by default, so the contents of
-the source directory land directly in the destination. Pass `--keep-name`
-if you want the source directory itself to appear under the destination.
+By default the source directory is preserved at the destination (rsync's
+native behavior). `rsync2project ~/code/myapp /backup/` creates
+`/backup/myapp/`. Pass `--contents` to spill the source's files directly
+into the destination without the intermediate directory.
 
 ### Named destinations
 

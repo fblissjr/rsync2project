@@ -19,7 +19,7 @@ type options struct {
 	showExcludes bool
 	listDests    bool
 	showVersion  bool
-	keepName     bool
+	contents     bool
 	destName     string
 	extraExcl    stringSlice
 }
@@ -111,7 +111,7 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
-	flag.BoolVar(&opts.keepName, "keep-name", false, "don't add trailing slash to source; nest source dir under destination")
+	flag.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
 	flag.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
 	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
@@ -149,8 +149,11 @@ Copies <source> to <destination>, excluding common build artifacts and
 dependency directories (node_modules, __pycache__, .venv, target, .gradle,
 etc.) and honoring each project's .gitignore.
 
-Source handling: trailing slash is added automatically so contents are
-copied into the destination rather than nested under a new directory.
+Source handling: by default the source directory is preserved at the
+destination (rsync's native behavior). For example,
+  rsync2project ~/code/myapp /backup/
+creates /backup/myapp/. Pass --contents to spill the source's files
+directly into the destination without the intermediate directory.
 
 Options:
   -n, --dry-run         Preview without transferring
@@ -158,7 +161,7 @@ Options:
       --delete          Delete files on destination not present on source
       --no-gitignore    Don't use .gitignore as an rsync filter
       --no-vcs          Exclude .git/.hg/.svn
-      --keep-name       Don't auto-append trailing slash; nest source under dest
+      --contents        Copy source contents into dest (don't nest by source name)
       --show-excludes   Print exclude list and exit
       --extra PATTERN   Additional exclude pattern (repeatable)
   -d, --dest NAME       Named destination from config file

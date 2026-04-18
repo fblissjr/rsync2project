@@ -7,29 +7,35 @@ import (
 	"testing"
 )
 
-// TestIntegrationSync actually shells out to rsync and verifies that the
-// curated exclude list filters real files. Skipped when rsync is not on PATH
-// so the unit suite still runs in minimal CI environments.
-func TestIntegrationSync(t *testing.T) {
+// TestIntegrationSyncDefault shells out to rsync and verifies both the
+// curated exclude list and the default "nest under source name" behavior.
+// Skipped when rsync is not on PATH so the unit suite still runs in minimal
+// CI environments.
+func TestIntegrationSyncDefault(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
 		t.Skip("rsync not available on PATH; skipping integration test")
 	}
 
-	src := t.TempDir()
+	parent := t.TempDir()
+	src := filepath.Join(parent, "testproj")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	dst := t.TempDir()
 
-	// Build a fake project with real source plus dirs/files that must be
-	// excluded: a Python venv, a node_modules tree, a __pycache__, and an
-	// .egg-info.
+	// A fake Python + Node project mixing real source and excluded junk.
 	files := map[string]string{
-		"main.py":                          "print('hello')\n",
-		"package.json":                     "{}\n",
-		"src/app.ts":                       "export {};\n",
-		".venv/bin/python":                 "binary",
-		"node_modules/left-pad/index.js":   "module.exports = x => x;\n",
-		"src/__pycache__/app.cpython.pyc":  "compiled",
-		"pkg.egg-info/PKG-INFO":            "Metadata-Version: 2.1\n",
-		".DS_Store":                        "mac-metadata",
+		"pyproject.toml":                  "[project]\nname=\"x\"\n",
+		"main.py":                         "print('hello')\n",
+		"package.json":                    "{}\n",
+		"src/app.ts":                      "export {};\n",
+		".venv/bin/python":                "binary",
+		"node_modules/left-pad/index.js":  "module.exports = x => x;\n",
+		"src/__pycache__/app.cpython.pyc": "compiled",
+		"pkg.egg-info/PKG-INFO":           "Metadata-Version: 2.1\n",
+		".DS_Store":                       "mac-metadata",
+		"build/lib/module.py":             "build artifact",
+		"dist/wheel.whl":                  "wheel artifact",
 	}
 	for rel, content := range files {
 		full := filepath.Join(src, rel)
@@ -53,6 +59,9 @@ func TestIntegrationSync(t *testing.T) {
 		t.Fatalf("runRsync: %v", err)
 	}
 
+	// With the default (nest) behavior, everything lands under dst/testproj/.
+	nest := filepath.Join(dst, "testproj")
+
 	mustExist := []string{"main.py", "package.json", "src/app.ts"}
 	mustMiss := []string{
 		".venv",
@@ -60,14 +69,16 @@ func TestIntegrationSync(t *testing.T) {
 		"src/__pycache__",
 		"pkg.egg-info",
 		".DS_Store",
+		"build",
+		"dist",
 	}
 	for _, rel := range mustExist {
-		if _, err := os.Stat(filepath.Join(dst, rel)); err != nil {
-			t.Errorf("expected %s to be copied, stat error: %v", rel, err)
+		if _, err := os.Stat(filepath.Join(nest, rel)); err != nil {
+			t.Errorf("expected %s to be copied under nest, stat error: %v", rel, err)
 		}
 	}
 	for _, rel := range mustMiss {
-		if _, err := os.Stat(filepath.Join(dst, rel)); err == nil {
+		if _, err := os.Stat(filepath.Join(nest, rel)); err == nil {
 			t.Errorf("expected %s to be excluded, but it exists at destination", rel)
 		} else if !os.IsNotExist(err) {
 			t.Errorf("unexpected error checking %s: %v", rel, err)
@@ -75,13 +86,15 @@ func TestIntegrationSync(t *testing.T) {
 	}
 }
 
-func TestIntegrationKeepName(t *testing.T) {
+// TestIntegrationContents verifies --contents spills the source's files
+// directly into the destination without the intermediate directory.
+func TestIntegrationContents(t *testing.T) {
 	if _, err := exec.LookPath("rsync"); err != nil {
 		t.Skip("rsync not available on PATH; skipping integration test")
 	}
 
 	parent := t.TempDir()
-	src := filepath.Join(parent, "myproject")
+	src := filepath.Join(parent, "testproj")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -90,14 +103,18 @@ func TestIntegrationKeepName(t *testing.T) {
 	}
 	dst := t.TempDir()
 
-	opts := &options{keepName: true}
+	opts := &options{contents: true}
 	if err := runRsync(src, dst+"/", nil, opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
-	// With --keep-name, rsync should nest the source directory under the dest.
-	nested := filepath.Join(dst, "myproject", "file.txt")
-	if _, err := os.Stat(nested); err != nil {
-		t.Errorf("expected nested file at %s, got: %v", nested, err)
+	// With --contents, file.txt lands directly in dst, not under dst/testproj/.
+	direct := filepath.Join(dst, "file.txt")
+	if _, err := os.Stat(direct); err != nil {
+		t.Errorf("expected file directly in dest at %s, got: %v", direct, err)
+	}
+	nested := filepath.Join(dst, "testproj")
+	if _, err := os.Stat(nested); err == nil {
+		t.Errorf("did not expect nested dir %s with --contents, but it exists", nested)
 	}
 }
