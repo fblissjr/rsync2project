@@ -18,4 +18,6 @@ Public Go CLI at github.com/fblissjr/rsync2project. Never commit personal data (
 - Integration tests: `t.Setenv("XDG_CONFIG_HOME", t.TempDir())` + `requireRsync(t)` + `setupFakeProject(t, files)` helpers.
 - Default path semantic is NEST source under destination; `--contents` for legacy spill-into behavior.
 - `.git/` included by default (backup intent); `--no-vcs` to skip.
+- `-n` means zero side effects: it also skips `--save-config` writes (prints a "would save" line instead).
+- `saveRepoConfig` refuses to overwrite when the existing file's `# source:` header names a different absolute path (basename-collision guard).
 - `internal/` is gitignored for private tutorials and session notes.

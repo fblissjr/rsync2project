@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const version = "0.4.0"
+const version = "0.4.1"
 
 type options struct {
 	dryRun        bool
@@ -93,10 +93,16 @@ func main() {
 				fail(fmt.Errorf("refusing to save config: %w", err))
 			}
 		}
-		if err := saveRepoConfig(absSource, repoCfg, opts.destName, opts.extraIncludes); err != nil {
-			fail(err)
+		// Honor the universal "-n means zero side effects" convention:
+		// under dry-run, report what would be saved but don't write.
+		if opts.dryRun {
+			fmt.Fprintf(os.Stderr, "dry-run: would save to %s\n", repoConfigPath(absSource))
+		} else {
+			if err := saveRepoConfig(absSource, repoCfg, opts.destName, opts.extraIncludes); err != nil {
+				fail(err)
+			}
+			fmt.Fprintf(os.Stderr, "saved: %s\n", repoConfigPath(absSource))
 		}
-		fmt.Fprintf(os.Stderr, "saved: %s\n", repoConfigPath(absSource))
 	}
 
 	if opts.showExcludes {

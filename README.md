@@ -63,6 +63,12 @@ A trailing `/` on a pattern auto-expands to include the directory's
 contents. Command-line `--dest` / `--include` always override anything
 in the file.
 
+Safety: `--save-config` refuses to overwrite an existing per-repo file
+whose header names a different absolute source path (protects against
+two repos with the same basename clobbering each other), and `-n`
+makes `--save-config` a no-op (prints what would be saved, writes
+nothing).
+
 ### Re-including gitignored content
 
 `--include PATTERN` (or a line in the per-repo config) re-includes paths

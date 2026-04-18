@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.4.1]
+
+### Fixed
+- `-n` (`--dry-run`) now also skips `--save-config` writes, matching the universal "dry-run means zero side effects" convention. Prints `dry-run: would save to ...` instead of writing.
+- `saveRepoConfig` refuses to overwrite an existing per-repo file whose `# source:` header names a different absolute path. Protects against two source directories with the same basename (e.g. `~/work/myapp` and `~/play/myapp`) silently clobbering each other's config.
+
 ## [0.4.0]
 
 ### Added
