@@ -1,6 +1,10 @@
 # Built binary
 /rsync2project
+
+#internal
 internal/
+coderef/
+
 # Go build output
 *.out
 *.test
