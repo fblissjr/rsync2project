@@ -41,6 +41,7 @@ Add a destination from the CLI:
 Then `--dest mac` (or `-d mac`). Other `dest` subcommands:
 
     rsync2project dest              # list (same as --list-dests)
+    rsync2project dest show NAME    # print one destination's value
     rsync2project dest add NAME VAL # add or update
     rsync2project dest rm NAME      # remove
     rsync2project dest add -n ...   # dry-run; prints what would be written
@@ -53,11 +54,12 @@ per line:
 
 ### Inspecting or cleaning up per-repo configs
 
-    rsync2project repo              # list saved repo configs
-    rsync2project repo show myapp   # print one
-    rsync2project repo rm myapp     # delete one
-    rsync2project repo path myapp   # print its file path
-    rsync2project config path       # print the config dir
+    rsync2project repo                            # list saved repo configs
+    rsync2project repo show myapp                 # print one (text)
+    rsync2project repo show --format json myapp   # ... as JSON for scripts
+    rsync2project repo rm myapp                   # delete one
+    rsync2project repo path myapp                 # print its file path
+    rsync2project config path                     # print the config dir
 
 Saving per-repo config still goes through `--save-config` on a sync
 invocation — see the next section.

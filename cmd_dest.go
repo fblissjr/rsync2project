@@ -21,6 +21,8 @@ func runDestCmd(args []string) int {
 	switch sub {
 	case "list", "ls":
 		return runDestList(rest)
+	case "show", "cat":
+		return runDestShow(rest)
 	case "add", "set":
 		return runDestAdd(rest)
 	case "rm", "remove", "delete":
@@ -38,8 +40,8 @@ func runDestCmd(args []string) int {
 func runDestList(args []string) int {
 	fs := flag.NewFlagSet("dest list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "rsync2project dest list: takes no arguments")
@@ -51,17 +53,37 @@ func runDestList(args []string) int {
 	return 0
 }
 
+func runDestShow(args []string) int {
+	fs := flag.NewFlagSet("dest show", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rsync2project dest show NAME")
+	}
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	v, err := resolveDestination(fs.Arg(0))
+	if err != nil {
+		return failMsg(err)
+	}
+	fmt.Println(v)
+	return 0
+}
+
 func runDestAdd(args []string) int {
 	fs := flag.NewFlagSet("dest add", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	dryRun := false
-	fs.BoolVar(&dryRun, "n", false, "preview without writing")
-	fs.BoolVar(&dryRun, "dry-run", false, "preview without writing")
+	var dryRun bool
+	addDryRunFlag(fs, &dryRun)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: rsync2project dest add [-n] NAME VALUE")
 	}
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 2 {
 		fs.Usage()
@@ -89,14 +111,13 @@ func runDestAdd(args []string) int {
 func runDestRm(args []string) int {
 	fs := flag.NewFlagSet("dest rm", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	dryRun := false
-	fs.BoolVar(&dryRun, "n", false, "preview without writing")
-	fs.BoolVar(&dryRun, "dry-run", false, "preview without writing")
+	var dryRun bool
+	addDryRunFlag(fs, &dryRun)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: rsync2project dest rm [-n] NAME")
 	}
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
@@ -105,8 +126,7 @@ func runDestRm(args []string) int {
 	name := fs.Arg(0)
 
 	if dryRun {
-		// Don't lie: check the entry actually exists before claiming we'd
-		// remove it. Keeps dry-run honest about outcomes.
+		// Verify existence so dry-run can't falsely report a no-op removal.
 		dests, err := parseKVFile(destinationsPath())
 		if err != nil {
 			return failMsg(err)
@@ -126,11 +146,6 @@ func runDestRm(args []string) int {
 	return 0
 }
 
-func failMsg(err error) int {
-	fmt.Fprintln(os.Stderr, "rsync2project:", err)
-	return 1
-}
-
 func destUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage: rsync2project dest <subcommand>
 
@@ -138,6 +153,7 @@ Manage named destinations in ~/.config/rsync2project/destinations.
 
 Subcommands:
   list                  List configured destinations (default if no subcommand)
+  show NAME             Print a single destination's value
   add NAME VALUE        Add or update a destination
   rm NAME               Remove a destination
 
@@ -145,7 +161,7 @@ Each mutating subcommand accepts -n / --dry-run to preview without writing.
 
 Examples:
   rsync2project dest add mac fred@mac.local:/Users/fred/backup/
-  rsync2project dest list
+  rsync2project dest show mac
   rsync2project dest rm mac
 `)
 }

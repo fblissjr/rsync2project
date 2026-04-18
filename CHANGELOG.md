@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1]
+
+### Added
+- `rsync2project dest show NAME` — print a single destination's value. Useful for scripting (e.g. `$(rsync2project dest show mac)`) and fills the symmetry gap with `repo show`.
+- `rsync2project repo show --format json NAME|PATH` — machine-readable output with `path`, `source` (from the `# source:` header), and `content` fields. Default remains human-readable text.
+
+### Fixed
+- `rsync2project dest add --help` (and all other subcommand `--help` variants) now exit 0 instead of 2. The `flag.ContinueOnError` mode returns `flag.ErrHelp` from `Parse`, which was being treated as a generic parse failure.
+
+### Changed
+- Extracted `parseSubFlags` / `failMsg` into `cmd_common.go` so every subcommand shares the help-exit-code handling and error formatting.
+- `config` subcommand lifted to the same per-subcommand FlagSet shape as `dest`/`repo`; adding a second `config` op is now a single case.
+
 ## [0.5.0]
 
 ### Added

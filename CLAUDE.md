@@ -26,6 +26,9 @@ Public Go CLI at github.com/fblissjr/rsync2project. Never commit personal data (
 ## Subcommand conventions
 
 - New management commands go under an `{area}` subcommand (`dest`, `repo`, `config`), dispatched from the top of `main()` ahead of `flag.Parse` so each subcommand owns its flags.
-- Subcommand handlers return `int` (exit code); `main` calls `os.Exit`. Inside subcommands, use `failMsg(err)` (prints `"rsync2project: <err>"` to stderr and returns 1) instead of the top-level `fail()` (which `os.Exit`s and short-circuits test coverage).
-- Each subcommand uses its own `flag.NewFlagSet(name, flag.ContinueOnError)` so `-n` etc. bind only inside that subcommand's scope.
+- Subcommand handlers return `int` (exit code); `main` calls `os.Exit`. Shared helpers live in `cmd_common.go`:
+  - `failMsg(err) int` — prints `"rsync2project: <err>"` to stderr and returns 1. Use this in subcommands instead of the top-level `fail()` (which `os.Exit`s and short-circuits test coverage).
+  - `parseSubFlags(fs, args) (stop bool, code int)` — wraps `fs.Parse` so `--help` returns exit 0 instead of 2. Every subcommand handler should use it in place of a direct `fs.Parse`.
+- Each subcommand uses its own `flag.NewFlagSet(name, flag.ContinueOnError)` so `-n`, `--format`, etc. bind only inside that subcommand's scope.
 - For arguments that can be either a repo name or a source path, use `resolveRepoConfigArg` — it normalizes both forms to the canonical `.conf` path.
+- Machine-readable output: prefer a `--format json` flag on the read-side subcommand rather than reshaping the default text output. Current precedent: `repo show --format json`.

@@ -102,6 +102,47 @@ func TestRunConfigPath(t *testing.T) {
 	}
 }
 
+func TestRunRepoShowFormatJSON(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := resolveRepoConfigArg("myapp")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "# rsync2project\n# source: /tmp/src/myapp\ndest = nas\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := runRepoCmd([]string{"show", "--format", "json", "myapp"}); code != 0 {
+		t.Errorf("json show exit = %d, want 0", code)
+	}
+	if code := runRepoCmd([]string{"show", "--format", "text", "myapp"}); code != 0 {
+		t.Errorf("text show exit = %d, want 0", code)
+	}
+	if code := runRepoCmd([]string{"show", "--format", "xml", "myapp"}); code != 2 {
+		t.Errorf("unknown format exit = %d, want 2", code)
+	}
+}
+
+func TestRepoHelpExitZero(t *testing.T) {
+	cases := [][]string{
+		{"list", "--help"},
+		{"show", "--help"},
+		{"rm", "--help"},
+		{"path", "--help"},
+	}
+	for _, c := range cases {
+		if code := runRepoCmd(c); code != 0 {
+			t.Errorf("runRepoCmd(%v) exit = %d, want 0", c, code)
+		}
+	}
+}
+
+func TestConfigHelpExitZero(t *testing.T) {
+	if code := runConfigCmd([]string{"path", "--help"}); code != 0 {
+		t.Errorf("config path --help exit = %d, want 0", code)
+	}
+}
+
 // Integration-lite: end-to-end list output mentions saved repo names.
 func TestRunRepoListWithEntries(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

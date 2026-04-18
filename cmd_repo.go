@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -37,8 +38,8 @@ func runRepoCmd(args []string) int {
 func runRepoList(args []string) int {
 	fs := flag.NewFlagSet("repo list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "rsync2project repo list: takes no arguments")
@@ -85,9 +86,13 @@ func runRepoList(args []string) int {
 func runRepoShow(args []string) int {
 	fs := flag.NewFlagSet("repo show", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: rsync2project repo show NAME|PATH") }
-	if err := fs.Parse(args); err != nil {
-		return 2
+	format := "text"
+	fs.StringVar(&format, "format", "text", "output format: text (default) or json")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: rsync2project repo show [--format text|json] NAME|PATH")
+	}
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
@@ -98,9 +103,31 @@ func runRepoShow(args []string) int {
 	if err != nil {
 		return failMsg(err)
 	}
-	fmt.Printf("# %s\n%s", path, data)
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		fmt.Println()
+
+	switch format {
+	case "text":
+		fmt.Printf("# %s\n%s", path, data)
+		if len(data) > 0 && data[len(data)-1] != '\n' {
+			fmt.Println()
+		}
+	case "json":
+		out := struct {
+			Path    string `json:"path"`
+			Source  string `json:"source"`
+			Content string `json:"content"`
+		}{
+			Path:    path,
+			Source:  readSourceHeader(path),
+			Content: string(data),
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(out); err != nil {
+			return failMsg(err)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "rsync2project repo show: unknown --format %q (supported: text, json)\n", format)
+		return 2
 	}
 	return 0
 }
@@ -108,12 +135,11 @@ func runRepoShow(args []string) int {
 func runRepoRm(args []string) int {
 	fs := flag.NewFlagSet("repo rm", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	dryRun := false
-	fs.BoolVar(&dryRun, "n", false, "preview without writing")
-	fs.BoolVar(&dryRun, "dry-run", false, "preview without writing")
+	var dryRun bool
+	addDryRunFlag(fs, &dryRun)
 	fs.Usage = func() { fmt.Fprintln(os.Stderr, "Usage: rsync2project repo rm [-n] NAME|PATH") }
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
@@ -142,8 +168,8 @@ func runRepoRm(args []string) int {
 func runRepoPath(args []string) int {
 	fs := flag.NewFlagSet("repo path", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if stop, code := parseSubFlags(fs, args); stop {
+		return code
 	}
 	switch fs.NArg() {
 	case 0:

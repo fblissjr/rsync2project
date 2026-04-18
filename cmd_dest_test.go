@@ -150,3 +150,34 @@ func TestRunDestUnknownSubcommand(t *testing.T) {
 		t.Errorf("expected exit 2 for unknown subcommand, got %d", code)
 	}
 }
+
+func TestRunDestShow(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if _, err := upsertDestination("mac", "fred@mac:/path/"); err != nil {
+		t.Fatal(err)
+	}
+	if code := runDestCmd([]string{"show", "mac"}); code != 0 {
+		t.Errorf("show existing exit = %d, want 0", code)
+	}
+	if code := runDestCmd([]string{"show", "ghost"}); code != 1 {
+		t.Errorf("show missing exit = %d, want 1", code)
+	}
+	if code := runDestCmd([]string{"show"}); code != 2 {
+		t.Errorf("show no-arg exit = %d, want 2", code)
+	}
+}
+
+func TestHelpExitZero(t *testing.T) {
+	// --help through any subcommand flagset should exit 0, not 2.
+	cases := [][]string{
+		{"add", "--help"},
+		{"rm", "--help"},
+		{"list", "--help"},
+		{"show", "--help"},
+	}
+	for _, c := range cases {
+		if code := runDestCmd(c); code != 0 {
+			t.Errorf("runDestCmd(%v) exit = %d, want 0", c, code)
+		}
+	}
+}
