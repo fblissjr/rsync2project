@@ -167,12 +167,45 @@ func loadRepoConfig(source string) (*repoConfig, error) {
 	return cfg, nil
 }
 
+// readSourceHeader returns the absolute source path recorded in an existing
+// repo config file's "# source: ..." header, or "" if the file is missing or
+// has no header. Used by saveRepoConfig to detect basename collisions
+// between two different source directories.
+func readSourceHeader(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || !strings.HasPrefix(line, "#") {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(strings.TrimLeft(line, "#"), " source:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
 // saveRepoConfig writes the repo's config file. Merges existing patterns
 // with newly supplied ones (raw, pre-expansion) and uses newDest if
 // non-empty, else preserves existing.dest. Creates the repos directory if
-// needed. The file's header records the absolute source path so future
-// humans can disambiguate same-basename collisions.
+// needed. The file's header records the absolute source path; if an
+// existing file's header names a different source, saveRepoConfig refuses
+// to overwrite so two repos with the same basename can't clobber each
+// other's config silently.
 func saveRepoConfig(source string, existing *repoConfig, newDest string, newIncludes []string) error {
+	path := repoConfigPath(source)
+	if existingSource := readSourceHeader(path); existingSource != "" && existingSource != source {
+		return fmt.Errorf(
+			"refusing to overwrite %s: it already holds config for %s (basename collision).\n"+
+				"edit that file manually, or rename one of the source directories.",
+			path, existingSource)
+	}
+
 	dest := existing.dest
 	if newDest != "" {
 		dest = newDest
@@ -188,7 +221,6 @@ func saveRepoConfig(source string, existing *repoConfig, newDest string, newIncl
 	}
 	merged = dedupe(merged)
 
-	path := repoConfigPath(source)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
