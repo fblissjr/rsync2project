@@ -7,36 +7,51 @@ import (
 	"strings"
 )
 
+type projectType string
+
+const (
+	ptPython projectType = "python"
+	ptNode   projectType = "node"
+	ptBun    projectType = "bun"
+	ptGo     projectType = "go"
+	ptRust   projectType = "rust"
+	ptJava   projectType = "java"
+	ptDotnet projectType = "dotnet"
+	ptRuby   projectType = "ruby"
+	ptPHP    projectType = "php"
+	ptXcode  projectType = "xcode"
+	ptElixir projectType = "elixir"
+)
+
 type marker struct {
 	pattern string // glob matched against the basename
-	typ     string
+	typ     projectType
 }
 
-// markers maps filename/directory patterns to project type labels. Multiple
-// patterns can map to the same type; detection deduplicates.
+// markers maps filename/directory patterns to project type labels.
 var markers = []marker{
-	{"pyproject.toml", "python"},
-	{"setup.py", "python"},
-	{"setup.cfg", "python"},
-	{"requirements.txt", "python"},
-	{"Pipfile", "python"},
-	{"package.json", "node"},
-	{"bun.lockb", "bun"},
-	{"pnpm-lock.yaml", "node"},
-	{"yarn.lock", "node"},
-	{"go.mod", "go"},
-	{"Cargo.toml", "rust"},
-	{"pom.xml", "java"},
-	{"build.gradle", "java"},
-	{"build.gradle.kts", "java"},
-	{"*.csproj", "dotnet"},
-	{"*.fsproj", "dotnet"},
-	{"*.sln", "dotnet"},
-	{"Gemfile", "ruby"},
-	{"composer.json", "php"},
-	{"*.xcodeproj", "xcode"},
-	{"*.xcworkspace", "xcode"},
-	{"mix.exs", "elixir"},
+	{"pyproject.toml", ptPython},
+	{"setup.py", ptPython},
+	{"setup.cfg", ptPython},
+	{"requirements.txt", ptPython},
+	{"Pipfile", ptPython},
+	{"package.json", ptNode},
+	{"bun.lockb", ptBun},
+	{"pnpm-lock.yaml", ptNode},
+	{"yarn.lock", ptNode},
+	{"go.mod", ptGo},
+	{"Cargo.toml", ptRust},
+	{"pom.xml", ptJava},
+	{"build.gradle", ptJava},
+	{"build.gradle.kts", ptJava},
+	{"*.csproj", ptDotnet},
+	{"*.fsproj", ptDotnet},
+	{"*.sln", ptDotnet},
+	{"Gemfile", ptRuby},
+	{"composer.json", ptPHP},
+	{"*.xcodeproj", ptXcode},
+	{"*.xcworkspace", ptXcode},
+	{"mix.exs", ptElixir},
 }
 
 // heavyDirs are never worth descending into while detecting project types.
@@ -68,9 +83,9 @@ var heavyDirs = map[string]struct{}{
 // known project markers and returns the unique set of detected types, sorted
 // alphabetically. Three levels is enough for typical monorepo layouts like
 // apps/<name>/package.json or services/<name>/go.mod.
-func detectProjectTypes(root string) []string {
+func detectProjectTypes(root string) []projectType {
 	const maxDepth = 3
-	seen := make(map[string]struct{})
+	seen := make(map[projectType]struct{})
 
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -103,10 +118,10 @@ func detectProjectTypes(root string) []string {
 		return nil
 	})
 
-	out := make([]string, 0, len(seen))
+	out := make([]projectType, 0, len(seen))
 	for k := range seen {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }

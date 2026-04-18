@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -18,26 +19,25 @@ func TestDetectProjectTypes(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "services", "api", "go.mod"), "module x\n")
 
 	types := detectProjectTypes(dir)
-	for _, want := range []string{"python", "node", "go"} {
-		if !contains(types, want) {
+	for _, want := range []projectType{ptPython, ptNode, ptGo} {
+		if !slices.Contains(types, want) {
 			t.Errorf("expected %q in %v", want, types)
 		}
 	}
 }
 
 func TestBuildExcludesVCS(t *testing.T) {
-	if ex := buildExcludes(nil, &options{excludeVCS: true}); !contains(ex, ".git/") {
+	if ex := buildExcludes(nil, true); !slices.Contains(ex, ".git/") {
 		t.Error("expected .git/ when excludeVCS is true")
 	}
-	ex := buildExcludes(nil, &options{excludeVCS: false})
-	if contains(ex, ".git/") {
+	if ex := buildExcludes(nil, false); slices.Contains(ex, ".git/") {
 		t.Error("did not expect .git/ when excludeVCS is false")
 	}
 }
 
 func TestBuildExcludesDotnet(t *testing.T) {
-	ex := buildExcludes([]string{"dotnet"}, &options{})
-	if !contains(ex, "bin/") || !contains(ex, "obj/") {
+	ex := buildExcludes([]projectType{ptDotnet}, false)
+	if !slices.Contains(ex, "bin/") || !slices.Contains(ex, "obj/") {
 		t.Errorf("expected bin/ and obj/ for dotnet; got %v", ex)
 	}
 }
@@ -66,13 +66,8 @@ func TestLooksRemote(t *testing.T) {
 func TestDedupe(t *testing.T) {
 	got := dedupe([]string{"a", "b", "a", "c", "b"})
 	want := []string{"a", "b", "c"}
-	if len(got) != len(want) {
-		t.Fatalf("dedupe len=%d, want %d: %v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("dedupe[%d]=%q, want %q", i, got[i], want[i])
-		}
+	if !slices.Equal(got, want) {
+		t.Errorf("dedupe = %v, want %v", got, want)
 	}
 }
 
@@ -125,13 +120,4 @@ func mustMkdir(t *testing.T, path string) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }

@@ -68,17 +68,17 @@ var vcsExclude = []string{
 // detected. These patterns are ambiguous enough that we don't want to include
 // them unconditionally (e.g. bin/ is a build dir for .NET but may be source
 // code for other projects).
-var projectTypeExcludes = map[string][]string{
-	"python": {"build/", "dist/"},
-	"dotnet": {"bin/", "obj/"},
-	"xcode": {
+var projectTypeExcludes = map[projectType][]string{
+	ptPython: {"build/", "dist/"},
+	ptDotnet: {"bin/", "obj/"},
+	ptXcode: {
 		"DerivedData/",
 		"*.xcworkspace/xcuserdata/",
 		"*.xcodeproj/xcuserdata/",
 	},
 }
 
-func buildExcludes(detected []string, opts *options) []string {
+func buildExcludes(detected []projectType, excludeVCS bool) []string {
 	out := make([]string, 0, len(alwaysExclude)+16)
 	out = append(out, alwaysExclude...)
 	for _, t := range detected {
@@ -86,7 +86,7 @@ func buildExcludes(detected []string, opts *options) []string {
 			out = append(out, extra...)
 		}
 	}
-	if opts.excludeVCS {
+	if excludeVCS {
 		out = append(out, vcsExclude...)
 	}
 	return out

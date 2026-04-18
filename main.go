@@ -8,20 +8,20 @@ import (
 	"strings"
 )
 
-const version = "0.1.0"
+const version = "0.3.0"
 
 type options struct {
-	dryRun       bool
-	verbose      bool
-	deleteExtras bool
-	noGitignore  bool
-	excludeVCS   bool
-	showExcludes bool
-	listDests    bool
-	showVersion  bool
-	contents     bool
-	destName     string
-	extraExcl    stringSlice
+	dryRun        bool
+	verbose       bool
+	deleteExtras  bool
+	noGitignore   bool
+	excludeVCS    bool
+	showExcludes  bool
+	listDests     bool
+	showVersion   bool
+	contents      bool
+	destName      string
+	extraExcludes stringSlice
 }
 
 type stringSlice []string
@@ -66,19 +66,19 @@ func main() {
 	}
 
 	types := detectProjectTypes(absSource)
-	excludes := buildExcludes(types, opts)
+	excludes := buildExcludes(types, opts.excludeVCS)
 	userExcludes, err := loadUserExcludes()
 	if err != nil {
 		fail(err)
 	}
 	excludes = append(excludes, userExcludes...)
-	excludes = append(excludes, opts.extraExcl...)
+	excludes = append(excludes, opts.extraExcludes...)
 	excludes = dedupe(excludes)
 
 	if opts.showExcludes {
 		fmt.Printf("Source:       %s\n", absSource)
 		if len(types) > 0 {
-			fmt.Printf("Detected:     %s\n", strings.Join(types, ", "))
+			fmt.Printf("Detected:     %s\n", joinTypes(types))
 		} else {
 			fmt.Printf("Detected:     (no known project markers)\n")
 		}
@@ -105,9 +105,9 @@ func parseFlags() *options {
 	opts := &options{}
 
 	flag.BoolVar(&opts.dryRun, "dry-run", false, "show what would be transferred without copying")
-	flag.BoolVar(&opts.dryRun, "n", false, "alias for --dry-run")
+	flag.BoolVar(&opts.dryRun, "n", false, "")
 	flag.BoolVar(&opts.verbose, "verbose", false, "verbose rsync output; also prints the invoked command")
-	flag.BoolVar(&opts.verbose, "v", false, "alias for --verbose")
+	flag.BoolVar(&opts.verbose, "v", false, "")
 	flag.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
@@ -116,8 +116,8 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.StringVar(&opts.destName, "dest", "", "named destination from ~/.config/rsync2project/destinations")
-	flag.StringVar(&opts.destName, "d", "", "alias for --dest")
-	flag.Var(&opts.extraExcl, "extra", "additional exclude pattern (repeatable)")
+	flag.StringVar(&opts.destName, "d", "", "")
+	flag.Var(&opts.extraExcludes, "extra", "additional exclude pattern (repeatable)")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -179,6 +179,14 @@ Examples:
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "rsync2project:", err)
 	os.Exit(1)
+}
+
+func joinTypes(types []projectType) string {
+	s := make([]string, len(types))
+	for i, t := range types {
+		s[i] = string(t)
+	}
+	return strings.Join(s, ", ")
 }
 
 func dedupe(in []string) []string {

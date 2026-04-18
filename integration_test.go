@@ -7,24 +7,35 @@ import (
 	"testing"
 )
 
-// TestIntegrationSyncDefault shells out to rsync and verifies both the
-// curated exclude list and the default "nest under source name" behavior.
-// Skipped when rsync is not on PATH so the unit suite still runs in minimal
-// CI environments.
-func TestIntegrationSyncDefault(t *testing.T) {
+func requireRsync(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("rsync"); err != nil {
 		t.Skip("rsync not available on PATH; skipping integration test")
 	}
+}
 
+// setupFakeProject creates a project directory named "testproj" inside a
+// fresh temp parent and populates it with the given relative paths. Returns
+// the absolute source path.
+func setupFakeProject(t *testing.T, files map[string]string) string {
+	t.Helper()
 	parent := t.TempDir()
 	src := filepath.Join(parent, "testproj")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dst := t.TempDir()
+	for rel, content := range files {
+		mustWrite(t, filepath.Join(src, rel), content)
+	}
+	return src
+}
 
-	// A fake Python + Node project mixing real source and excluded junk.
-	files := map[string]string{
+// TestIntegrationSyncDefault shells out to rsync and verifies both the
+// curated exclude list and the default "nest under source name" behavior.
+func TestIntegrationSyncDefault(t *testing.T) {
+	requireRsync(t)
+
+	src := setupFakeProject(t, map[string]string{
 		"pyproject.toml":                  "[project]\nname=\"x\"\n",
 		"main.py":                         "print('hello')\n",
 		"package.json":                    "{}\n",
@@ -36,26 +47,14 @@ func TestIntegrationSyncDefault(t *testing.T) {
 		".DS_Store":                       "mac-metadata",
 		"build/lib/module.py":             "build artifact",
 		"dist/wheel.whl":                  "wheel artifact",
-	}
-	for rel, content := range files {
-		full := filepath.Join(src, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	})
+	dst := t.TempDir()
 
-	absSrc, err := filepath.Abs(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	types := detectProjectTypes(absSrc)
+	types := detectProjectTypes(src)
 	opts := &options{}
-	excludes := buildExcludes(types, opts)
+	excludes := buildExcludes(types, opts.excludeVCS)
 
-	if err := runRsync(absSrc, dst+"/", excludes, opts); err != nil {
+	if err := runRsync(src, dst+"/", excludes, opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -89,18 +88,9 @@ func TestIntegrationSyncDefault(t *testing.T) {
 // TestIntegrationContents verifies --contents spills the source's files
 // directly into the destination without the intermediate directory.
 func TestIntegrationContents(t *testing.T) {
-	if _, err := exec.LookPath("rsync"); err != nil {
-		t.Skip("rsync not available on PATH; skipping integration test")
-	}
+	requireRsync(t)
 
-	parent := t.TempDir()
-	src := filepath.Join(parent, "testproj")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(src, "file.txt"), []byte("hi\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	src := setupFakeProject(t, map[string]string{"file.txt": "hi\n"})
 	dst := t.TempDir()
 
 	opts := &options{contents: true}
@@ -108,7 +98,6 @@ func TestIntegrationContents(t *testing.T) {
 		t.Fatalf("runRsync: %v", err)
 	}
 
-	// With --contents, file.txt lands directly in dst, not under dst/testproj/.
 	direct := filepath.Join(dst, "file.txt")
 	if _, err := os.Stat(direct); err != nil {
 		t.Errorf("expected file directly in dest at %s, got: %v", direct, err)

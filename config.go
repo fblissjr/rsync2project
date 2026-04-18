@@ -20,17 +20,16 @@ func configDir() string {
 func destinationsPath() string { return filepath.Join(configDir(), "destinations") }
 func excludesPath() string     { return filepath.Join(configDir(), "excludes") }
 
-// parseKVFile reads a simple name=value config file. Lines starting with '#'
-// are comments; blank lines are skipped. Returns an empty map if the file
-// does not exist.
-func parseKVFile(path string) (map[string]string, error) {
-	out := make(map[string]string)
+// forEachConfigLine invokes fn for each non-blank, non-comment line of path
+// after trimming surrounding whitespace. Missing files are treated as empty
+// so both config files are optional for callers.
+func forEachConfigLine(path string, fn func(lineNo int, line string) error) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return out, nil
+			return nil
 		}
-		return nil, err
+		return err
 	}
 	defer f.Close()
 
@@ -42,39 +41,33 @@ func parseKVFile(path string) (map[string]string, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, fmt.Errorf("%s:%d: expected name=value, got %q", path, lineNo, line)
+		if err := fn(lineNo, line); err != nil {
+			return err
 		}
-		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return sc.Err()
 }
 
-// parseLineFile reads a file with one non-comment, non-blank entry per line.
+func parseKVFile(path string) (map[string]string, error) {
+	out := make(map[string]string)
+	err := forEachConfigLine(path, func(lineNo int, line string) error {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("%s:%d: expected name=value, got %q", path, lineNo, line)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		return nil
+	})
+	return out, err
+}
+
 func parseLineFile(path string) ([]string, error) {
 	var out []string
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return out, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+	err := forEachConfigLine(path, func(_ int, line string) error {
 		out = append(out, line)
-	}
-	return out, sc.Err()
+		return nil
+	})
+	return out, err
 }
 
 func resolveDestination(name string) (string, error) {
