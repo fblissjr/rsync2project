@@ -9,3 +9,6 @@ internal/
 .DS_Store
 *.swp
 *~
+
+# Personal Claude context (never commit)
+.claude.local.md
