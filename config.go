@@ -124,15 +124,12 @@ func repoConfigPath(source string) string {
 	return filepath.Join(reposDir(), filepath.Base(source)+".conf")
 }
 
-// repoConfig holds the per-source configuration parsed from .rsync2project.
-// Fields are zero-valued when absent; a missing file is not an error.
-//
-// rawIncludes preserves the user-entered patterns (before directory
-// auto-expansion to /***) so they can be written back verbatim by
-// saveRepoConfig.
+// repoConfig holds the per-source configuration. Fields are zero-valued
+// when absent; a missing file is not an error. rawIncludes holds the
+// user-entered include patterns; consumers call expandIncludePatterns to
+// get the rsync-ready form.
 type repoConfig struct {
 	dest        string
-	includes    []string
 	rawIncludes []string
 }
 
@@ -148,7 +145,6 @@ type repoConfig struct {
 // non-comment lines are treated as rsync include patterns.
 func loadRepoConfig(source string) (*repoConfig, error) {
 	cfg := &repoConfig{}
-	var rawIncludes []string
 	path := repoConfigPath(source)
 	err := forEachConfigLine(path, func(lineNo int, line string) error {
 		if k, v, ok := strings.Cut(line, "="); ok {
@@ -162,14 +158,12 @@ func loadRepoConfig(source string) (*repoConfig, error) {
 			}
 			return nil
 		}
-		rawIncludes = append(rawIncludes, line)
+		cfg.rawIncludes = append(cfg.rawIncludes, line)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	cfg.rawIncludes = rawIncludes
-	cfg.includes = expandIncludePatterns(rawIncludes)
 	return cfg, nil
 }
 
@@ -222,15 +216,17 @@ func saveRepoConfig(source string, existing *repoConfig, newDest string, newIncl
 	return nil
 }
 
-// expandIncludePatterns strips an optional leading '+ ' (so users can
-// paraphrase rsync's native filter syntax) and auto-expands directory-style
-// patterns (those ending in '/') into both "X/" and "X/***" entries so the
-// directory itself AND its contents survive any later exclude or gitignore
-// filter.
+// expandIncludePatterns strips an optional leading '+ ' (rsync's native
+// include marker) and auto-expands directory-style patterns (trailing '/')
+// into both "X/" and "X/***" so the directory AND its contents survive any
+// later exclude or gitignore filter. Trims whitespace; blank lines drop out.
 func expandIncludePatterns(patterns []string) []string {
 	out := make([]string, 0, len(patterns)*2)
 	for _, p := range patterns {
-		p = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(p, "+ "), "+"))
+		if rest, ok := strings.CutPrefix(p, "+ "); ok {
+			p = rest
+		}
+		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}

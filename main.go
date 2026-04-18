@@ -81,11 +81,18 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	includes := append([]string{}, repoCfg.includes...)
-	includes = append(includes, expandIncludePatterns(opts.extraIncludes)...)
-	includes = dedupe(includes)
+	raw := append([]string{}, repoCfg.rawIncludes...)
+	raw = append(raw, opts.extraIncludes...)
+	includes := dedupe(expandIncludePatterns(raw))
 
 	if opts.saveConfig {
+		// Validate the destination name before persisting it, so a typo
+		// doesn't silently break every future run against this repo.
+		if opts.destName != "" {
+			if _, err := resolveDestination(opts.destName); err != nil {
+				fail(fmt.Errorf("refusing to save config: %w", err))
+			}
+		}
 		if err := saveRepoConfig(absSource, repoCfg, opts.destName, opts.extraIncludes); err != nil {
 			fail(err)
 		}
@@ -150,25 +157,24 @@ func parseFlags() *options {
 }
 
 // resolveDest picks a destination using priority: explicit --dest, explicit
-// positional, then the default from the repo config (if any). If --dest is
-// empty and there's no positional, a repo-configured dest acts as the
-// "remembered" target so repeat syncs become a one-arg command.
+// positional, then the repo config's dest= directive as a silent default.
+// A positional argument overrides a repo config default without error — the
+// repo default exists precisely to be overridable. Only --dest + positional
+// is a real conflict.
 func resolveDest(opts *options, args []string, repoDefault string) (string, error) {
-	name := opts.destName
-	if name == "" && len(args) < 2 && repoDefault != "" {
-		name = repoDefault
+	if opts.destName != "" && len(args) > 1 {
+		return "", fmt.Errorf("cannot supply both --dest and a positional destination")
 	}
-	switch {
-	case name != "":
-		if len(args) > 1 {
-			return "", fmt.Errorf("cannot supply both --dest/repo-config dest and a positional destination")
-		}
-		return resolveDestination(name)
-	case len(args) >= 2:
+	if opts.destName != "" {
+		return resolveDestination(opts.destName)
+	}
+	if len(args) >= 2 {
 		return args[1], nil
-	default:
-		return "", fmt.Errorf("destination required (positional, --dest NAME, or 'dest = NAME' in repo config)")
 	}
+	if repoDefault != "" {
+		return resolveDestination(repoDefault)
+	}
+	return "", fmt.Errorf("destination required (positional, --dest NAME, or 'dest = NAME' in repo config)")
 }
 
 func usage() {

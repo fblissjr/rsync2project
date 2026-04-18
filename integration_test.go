@@ -139,9 +139,10 @@ func TestIntegrationRepoIncludeBeatsGitignore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	includes := expandIncludePatterns(cfg.rawIncludes)
 	excludes := buildExcludes(detectProjectTypes(src), false)
 
-	if err := runRsync(src, dst+"/", cfg.includes, excludes, &options{}); err != nil {
+	if err := runRsync(src, dst+"/", includes, excludes, &options{}); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -192,7 +193,8 @@ func TestRepoConfigRoundTrip(t *testing.T) {
 	// internal/ auto-expands to internal/ + internal/***
 	// models/weights.bin stays as-is (no trailing slash)
 	// -> 3 expanded includes total
-	if len(cfg.includes) != 3 {
-		t.Errorf("includes=%v, want 3 entries", cfg.includes)
+	includes := expandIncludePatterns(cfg.rawIncludes)
+	if len(includes) != 3 {
+		t.Errorf("includes=%v, want 3 entries", includes)
 	}
 }
