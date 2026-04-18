@@ -47,7 +47,10 @@ var alwaysExclude = []string{
 	".yarn/cache/",
 	".yarn/install-state.gz",
 
-	// Rust / JVM build output (also used by Maven/SBT)
+	// Rust / Maven / SBT build output. Tradeoff: always excluded because
+	// it's overwhelmingly a build artifact directory. A project with a
+	// legitimate top-level target/ source folder isn't well-served by this
+	// tool; use rsync directly with a custom filter.
 	"target/",
 
 	// Gradle

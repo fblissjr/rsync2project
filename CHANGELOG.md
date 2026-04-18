@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0]
+
+### Added
+- `--keep-name` flag: pass the source through without an auto-appended trailing slash, so the source directory nests under the destination instead of spilling its contents.
+- Integration tests that invoke real `rsync` to verify the exclude list and `--keep-name` behavior end-to-end; skipped automatically when `rsync` is not on `PATH`.
+
+### Changed
+- Clarified in-code comment on why `target/` is always excluded and what to do if a project has a legitimate top-level `target/` directory.
+
 ## [0.1.0]
 
 ### Added

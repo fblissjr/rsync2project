@@ -42,11 +42,12 @@ func runRsync(source, destination string, excludes []string, opts *options) erro
 		args = append(args, "--exclude="+e)
 	}
 
-	// Always treat source as "copy its contents" by ensuring a trailing
-	// slash. This mirrors the most common backup intent and matches what the
-	// README documents.
+	// Default: treat source as "copy its contents" by appending a trailing
+	// slash. --keep-name passes the source through as-is, which nests the
+	// source dir under the destination (standard rsync "no trailing slash"
+	// semantics).
 	src := source
-	if !strings.HasSuffix(src, "/") {
+	if !opts.keepName && !strings.HasSuffix(src, "/") {
 		src += "/"
 	}
 	args = append(args, src, destination)

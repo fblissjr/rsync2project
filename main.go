@@ -19,6 +19,7 @@ type options struct {
 	showExcludes bool
 	listDests    bool
 	showVersion  bool
+	keepName     bool
 	destName     string
 	extraExcl    stringSlice
 }
@@ -110,6 +111,7 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
+	flag.BoolVar(&opts.keepName, "keep-name", false, "don't add trailing slash to source; nest source dir under destination")
 	flag.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
 	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
@@ -156,6 +158,7 @@ Options:
       --delete          Delete files on destination not present on source
       --no-gitignore    Don't use .gitignore as an rsync filter
       --no-vcs          Exclude .git/.hg/.svn
+      --keep-name       Don't auto-append trailing slash; nest source under dest
       --show-excludes   Print exclude list and exit
       --extra PATTERN   Additional exclude pattern (repeatable)
   -d, --dest NAME       Named destination from config file
