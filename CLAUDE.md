@@ -22,6 +22,8 @@ Public Go CLI at github.com/fblissjr/rsync2project. Never commit personal data (
 - `-n` means zero side effects. Applies to `--save-config` writes and to every mutating subcommand (`dest add`, `dest rm`, `repo rm`). Prints "dry-run: would ..." instead of acting.
 - `saveRepoConfig` refuses to overwrite when the existing file's `# source:` header names a different absolute path (basename-collision guard).
 - `internal/` is gitignored for private tutorials and session notes.
+- Version bump ritual: update `main.go` version const + `CHANGELOG.md` entry, and (if `internal/` exists locally) refresh `internal/tutorial.md` version refs and append a timeline entry to today's `internal/log/log_<date>.md`.
+- Legacy CLI flags replaced by subcommands (e.g. `--list-dests` vs `dest list`) are kept as working aliases on purpose — don't remove without a soft-deprecation plan across all of them in one release.
 
 ## Subcommand conventions
 
@@ -29,6 +31,7 @@ Public Go CLI at github.com/fblissjr/rsync2project. Never commit personal data (
 - Subcommand handlers return `int` (exit code); `main` calls `os.Exit`. Shared helpers live in `cmd_common.go`:
   - `failMsg(err) int` — prints `"rsync2project: <err>"` to stderr and returns 1. Use this in subcommands instead of the top-level `fail()` (which `os.Exit`s and short-circuits test coverage).
   - `parseSubFlags(fs, args) (stop bool, code int)` — wraps `fs.Parse` so `--help` returns exit 0 instead of 2. Every subcommand handler should use it in place of a direct `fs.Parse`.
+  - `addDryRunFlag(fs, &dryRun)` — binds both `-n` and `--dry-run` to one bool. Use for any mutating subcommand so the alias contract stays in one place.
 - Each subcommand uses its own `flag.NewFlagSet(name, flag.ContinueOnError)` so `-n`, `--format`, etc. bind only inside that subcommand's scope.
 - For arguments that can be either a repo name or a source path, use `resolveRepoConfigArg` — it normalizes both forms to the canonical `.conf` path.
 - Machine-readable output: prefer a `--format json` flag on the read-side subcommand rather than reshaping the default text output. Current precedent: `repo show --format json`.
