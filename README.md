@@ -20,8 +20,9 @@ Or `go build -o rsync2project .` and drop the binary on your `PATH`.
     rsync2project -n --show-excludes <source>
 
 Flags: `-n`, `-v`, `--delete`, `--no-gitignore`, `--no-vcs`,
-`--show-excludes`, `--extra PATTERN`, `-d/--dest NAME`, `--contents`,
-`--list-dests`, `--version`.
+`--show-excludes`, `--extra PATTERN`, `--include PATTERN`,
+`--save-config`, `-d/--dest NAME`, `--contents`, `--list-dests`,
+`--version`.
 
 By default the source directory is preserved at the destination (rsync's
 native behavior). `rsync2project ~/code/myapp /backup/` creates
@@ -35,6 +36,39 @@ Create `~/.config/rsync2project/destinations`, one `name=target` per line:
     name=user@host:/path/
 
 Then `--dest name`.
+
+### Per-repo config (persist your settings)
+
+Figure out the right flags once, then save them so future syncs are a
+single command:
+
+    rsync2project --save-config --dest nas --include internal/ ~/code/myapp
+
+Writes `~/.config/rsync2project/repos/myapp.conf`. Subsequent runs can
+omit the flags:
+
+    rsync2project ~/code/myapp
+
+The file lives in the central config dir — not in the source tree — so
+it can't be accidentally committed. Format:
+
+    # directives
+    dest = nas
+
+    # rsync include patterns (override .gitignore and baseline excludes)
+    internal/
+    models/weights.bin
+
+A trailing `/` on a pattern auto-expands to include the directory's
+contents. Command-line `--dest` / `--include` always override anything
+in the file.
+
+### Re-including gitignored content
+
+`--include PATTERN` (or a line in the per-repo config) re-includes paths
+that `.gitignore` or the baseline excludes would otherwise drop. Useful
+for personal backups: `models/`, `data/raw/`, and `.env` files stay out
+of GitHub but still land on your NAS.
 
 ### Extra global excludes
 

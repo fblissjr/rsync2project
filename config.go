@@ -133,7 +133,7 @@ type repoConfig struct {
 	rawIncludes []string
 }
 
-// loadRepoConfig reads <source>/.rsync2project. Format:
+// loadRepoConfig reads ~/.config/rsync2project/repos/<basename>.conf. Format:
 //
 //	# comments and blank lines are ignored
 //	dest = name              (optional directive, same semantics as --dest)

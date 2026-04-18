@@ -142,7 +142,7 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
 	flag.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
-	flag.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to <source>/.rsync2project for reuse")
+	flag.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to ~/.config/rsync2project/repos/<basename>.conf for reuse")
 	flag.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
 	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
@@ -204,7 +204,7 @@ Options:
       --show-excludes   Print exclude list and exit
       --extra PATTERN   Additional exclude pattern (repeatable)
       --include PATTERN Re-include a path that .gitignore/excludes would drop (repeatable)
-      --save-config     Persist current --dest and --include flags to <source>/.rsync2project
+      --save-config     Persist current --dest and --include flags to per-repo config
   -d, --dest NAME       Named destination from config file
       --list-dests      List configured destinations and exit
       --version         Print version
