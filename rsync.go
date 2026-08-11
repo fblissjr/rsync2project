@@ -15,6 +15,10 @@ type gitignoreFilter struct {
 	enabled  bool
 	fromGit  bool
 	excludes []string
+	// fallbackReason explains why the approximate path was taken, so the
+	// banner can distinguish a routine non-repo source from a real git
+	// failure instead of asserting the same thing about both.
+	fallbackReason string
 }
 
 // runRsync builds the rsync argv and execs it, streaming stdio to the user.
@@ -74,6 +78,20 @@ func runRsync(source, destination string, includes, excludes []string, gf gitign
 			defer cleanup()
 			args = append(args, "--exclude-from="+path)
 		}
+		// Receiver-side ("r" modifier) dir-merge, which reads the
+		// destination's own .gitignore and protects matching paths from
+		// --delete. The git-derived set above only knows about paths that
+		// exist in the source right now, so ignored content that lives
+		// only at the destination — synced earlier, since deleted locally
+		// — would otherwise be wiped, contradicting the intent stated at
+		// --delete below. Marking it receiver-only keeps it out of the
+		// sending decision, so the negation and tracked-file fidelity the
+		// git set provides is untouched.
+		//
+		// This is also why --from0 is not used for the pattern file: it
+		// would switch this merge file to NUL parsing and silently
+		// disable the protection.
+		args = append(args, "--filter=:-r .gitignore")
 	default:
 		args = append(args, "--filter=:- .gitignore")
 	}

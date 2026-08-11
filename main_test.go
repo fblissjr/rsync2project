@@ -180,7 +180,13 @@ func TestEscapeRsyncPattern(t *testing.T) {
 		{"weird[1].txt", `weird\[1].txt`},
 		{"star*.log", `star\*.log`},
 		{"what?.txt", `what\?.txt`},
-		{`back\slash`, `back\\slash`},
+		// No wildcard in the pattern means rsync compares literally and
+		// never honors escapes, so escaping the backslash here would make
+		// the pattern stop matching its own file.
+		{`back\slash`, `back\slash`},
+		// With a wildcard present the pattern IS parsed, so now every
+		// backslash has to be escaped too.
+		{`back\slash*.txt`, `back\\slash\*.txt`},
 	}
 	for _, c := range cases {
 		if got := escapeRsyncPattern(c.in); got != c.want {

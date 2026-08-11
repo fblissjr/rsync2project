@@ -19,6 +19,14 @@ type gitIgnoreSet struct {
 	// selfIgnored reports that an enclosing repo ignores the source
 	// directory itself, so git had nothing to say about its contents.
 	selfIgnored bool
+	// unrepresentable holds ignored paths that cannot be written to a
+	// line-based pattern file (see loadGitIgnoreSet).
+	unrepresentable []string
+	// why explains, when ok is false, what stopped git from answering.
+	// Reported verbatim in the banner: "not a git repo" is routine, but
+	// "git failed" is worth noticing, and conflating them tells the user
+	// something false about their own project.
+	why string
 }
 
 // loadGitIgnoreSet asks git which paths under source it ignores.
@@ -46,11 +54,11 @@ type gitIgnoreSet struct {
 // better than refusing to sync.
 func loadGitIgnoreSet(source string) gitIgnoreSet {
 	if _, err := exec.LookPath("git"); err != nil {
-		return gitIgnoreSet{}
+		return gitIgnoreSet{why: "git not installed"}
 	}
 	top, err := gitOutput(source, "rev-parse", "--show-toplevel")
 	if err != nil || top == "" {
-		return gitIgnoreSet{}
+		return gitIgnoreSet{why: "not a git repo"}
 	}
 
 	// --full-name reports paths relative to the repo root, which stays
@@ -70,14 +78,14 @@ func loadGitIgnoreSet(source string) gitIgnoreSet {
 	}
 	prefix := ""
 	if rel, err := filepath.Rel(top, resolved); err != nil {
-		return gitIgnoreSet{}
+		return gitIgnoreSet{why: "source path could not be related to the repo root"}
 	} else if rel != "." {
 		// A source outside its own repo toplevel means the two paths could
 		// not be related. Falling back to the approximate filter is the
 		// safe failure: an empty set here would be indistinguishable from
 		// "this repo ignores nothing" and would quietly copy everything.
 		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return gitIgnoreSet{}
+			return gitIgnoreSet{why: "source path resolves outside the repo root"}
 		}
 		prefix = filepath.ToSlash(rel) + "/"
 	}
@@ -85,7 +93,10 @@ func loadGitIgnoreSet(source string) gitIgnoreSet {
 	out, err := gitOutput(source, "ls-files", "-z", "--others", "--ignored",
 		"--exclude-standard", "--directory", "--full-name")
 	if err != nil {
-		return gitIgnoreSet{}
+		// git aborts here when the source sits inside an ignored directory
+		// ("directory entry not superset of prefix"). Reporting that as
+		// "not a git repo" would be a lie about the user's own project.
+		return gitIgnoreSet{why: "git could not list ignored paths (source may be inside an ignored directory)"}
 	}
 
 	set := gitIgnoreSet{ok: true}
@@ -109,6 +120,17 @@ func loadGitIgnoreSet(source string) gitIgnoreSet {
 			set.selfIgnored = true
 			continue
 		}
+		// --exclude-from is line-based, and rsync's --from0 cannot rescue
+		// it here: that flag also switches the .gitignore dir-merge to NUL
+		// parsing, which breaks the receiver-side protection below. A path
+		// containing a newline would split into two patterns, the second
+		// unanchored and free to exclude unrelated files anywhere in the
+		// tree. Dropping it copies one file too many; keeping it would
+		// silently drop others.
+		if strings.ContainsAny(entry, "\n\r") {
+			set.unrepresentable = append(set.unrepresentable, entry)
+			continue
+		}
 		set.paths = append(set.paths, entry)
 	}
 	return set
@@ -125,11 +147,14 @@ func loadGitIgnoreSet(source string) gitIgnoreSet {
 func (g gitIgnoreSet) rsyncExcludes(source string, contents bool) []string {
 	root := "/"
 	if !contents {
-		root = "/" + escapeRsyncPattern(filepath.Base(source)) + "/"
+		root = "/" + filepath.Base(source) + "/"
 	}
 	out := make([]string, 0, len(g.paths))
 	for _, p := range g.paths {
-		out = append(out, root+escapeRsyncPattern(p))
+		// Escape the assembled pattern rather than its parts: whether a
+		// backslash needs escaping depends on the whole pattern containing
+		// a wildcard, so the basename and the path cannot be judged apart.
+		out = append(out, escapeRsyncPattern(root+p))
 	}
 	return out
 }
@@ -139,9 +164,19 @@ func (g gitIgnoreSet) rsyncExcludes(source string, contents bool) []string {
 // Without this a file named "weird[1].txt" produces a character class that
 // excludes "w1.txt" and leaves the actual file behind — the exclude lands
 // on the wrong file entirely.
+//
+// The backslash is deliberately conditional. rsync only parses a pattern as
+// a wildcard (and so only honors escapes) when it contains '*', '?' or '[';
+// otherwise it compares literally, where a backslash is just a backslash.
+// Escaping unconditionally therefore breaks the plain case: "back\slash"
+// would become "back\\slash", still a literal comparison, now against a
+// name with two backslashes — and the exclude silently misses.
 func escapeRsyncPattern(p string) string {
+	if !strings.ContainsAny(p, "*?[") {
+		return p
+	}
 	var b strings.Builder
-	b.Grow(len(p))
+	b.Grow(len(p) + 8)
 	for _, r := range p {
 		switch r {
 		case '\\', '*', '?', '[':

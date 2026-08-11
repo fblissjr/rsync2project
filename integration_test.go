@@ -355,6 +355,122 @@ func TestIntegrationGitignoreSubdirOfRepo(t *testing.T) {
 	assertAbsent(t, nest, "subdir-of-repo", []string{"dist"})
 }
 
+// TestIntegrationDeleteProtectsDestOnlyIgnored pins the receiver-side
+// protection. The git-derived ignore set only knows paths that exist in
+// the source right now, so ignored content living only at the destination
+// (synced earlier, since deleted locally) has no pattern covering it and
+// --delete would wipe it. That contradicts the deliberate choice not to
+// pass --delete-excluded.
+func TestIntegrationDeleteProtectsDestOnlyIgnored(t *testing.T) {
+	requireRsync(t)
+	requireGit(t)
+
+	src := setupGitRepo(t, map[string]string{
+		".gitignore": "output/\n",
+		"keep.py":    "print('hi')\n",
+	}, []string{".gitignore", "keep.py"}) // note: no output/ in the source
+
+	dst := t.TempDir()
+	// The destination looks like a previous sync: it has the project's
+	// .gitignore and ignored content that is now gone locally.
+	mustWrite(t, filepath.Join(dst, ".gitignore"), "output/\n")
+	mustWrite(t, filepath.Join(dst, "output", "run1.png"), "generated earlier")
+
+	opts := &options{contents: true, deleteExtras: true, excludeVCS: true}
+	gf := resolveGitignoreFilter(src, opts)
+	if err := runRsync(src, dst+"/", nil, buildExcludeList(nil, nil, opts), gf, opts); err != nil {
+		t.Fatalf("runRsync: %v", err)
+	}
+
+	assertPresent(t, dst, "delete-protection", []string{"keep.py", "output/run1.png"})
+}
+
+// TestGitIgnoreSetFallbackReasons verifies the banner distinguishes a
+// routine non-repo source from a genuine git failure. Reporting "no git
+// repo" for a directory that plainly is inside one tells the user
+// something false about their own project.
+func TestGitIgnoreSetFallbackReasons(t *testing.T) {
+	requireGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	// A source nested inside an ignored directory makes git ls-files abort
+	// with "directory entry not superset of prefix".
+	repo := setupFakeProject(t, map[string]string{
+		".gitignore":          "vendor/\n",
+		"a.py":                "x\n",
+		"vendor/pkg/lib.go":   "package pkg\n",
+		"vendor/pkg/notes.md": "x\n",
+	})
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-f", "--", ".gitignore", "a.py"},
+		{"-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit", "-qm", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	set := loadGitIgnoreSet(filepath.Join(repo, "vendor", "pkg"))
+	if set.ok {
+		t.Fatal("expected git to fail for a source inside an ignored directory")
+	}
+	if strings.Contains(set.why, "not a git repo") {
+		t.Errorf("must not claim %q for a path that is inside a repo; got %q", "not a git repo", set.why)
+	}
+	if set.why == "" {
+		t.Error("fallback must carry a reason")
+	}
+
+	// And the routine case still reads as such.
+	plain := loadGitIgnoreSet(setupFakeProject(t, map[string]string{"a.py": "x\n"}))
+	if plain.ok || plain.why != "not a git repo" {
+		t.Errorf("non-repo source: got ok=%v why=%q", plain.ok, plain.why)
+	}
+}
+
+// TestGitIgnoreSetSkipsUnrepresentable verifies a newline-bearing ignored
+// path is dropped rather than written into the line-based pattern file,
+// where its second fragment would become an unanchored rule free to
+// exclude unrelated files anywhere in the tree.
+func TestGitIgnoreSetSkipsUnrepresentable(t *testing.T) {
+	requireGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	src := setupFakeProject(t, map[string]string{".gitignore": "*.log\n", "keep.py": "x\n"})
+	if err := os.WriteFile(filepath.Join(src, "we\nird.log"), []byte("x"), 0o644); err != nil {
+		t.Skipf("filesystem rejects newline in filename: %v", err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-f", "--", ".gitignore", "keep.py"},
+		{"-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit", "-qm", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = src
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	set := loadGitIgnoreSet(src)
+	if !set.ok {
+		t.Fatalf("expected git to answer, got %+v", set)
+	}
+	if len(set.unrepresentable) != 1 {
+		t.Errorf("expected the newline path to be quarantined, got %+v", set)
+	}
+	for _, p := range set.paths {
+		if strings.ContainsAny(p, "\n\r") {
+			t.Errorf("newline path leaked into the pattern set: %q", p)
+		}
+	}
+}
+
 // TestGitIgnoreSetFallback verifies a non-repo source degrades to the
 // approximate filter instead of erroring or silently dropping the filter.
 func TestGitIgnoreSetFallback(t *testing.T) {
@@ -366,8 +482,9 @@ func TestGitIgnoreSetFallback(t *testing.T) {
 	if !gf.enabled || gf.fromGit {
 		t.Errorf("expected the approximate filter to stay enabled, got %+v", gf)
 	}
-	if got := gitignoreMode(gf); !strings.Contains(got, "approximate") {
-		t.Errorf("banner should disclose the fallback, got %q", got)
+	got := gitignoreMode(gf)
+	if !strings.Contains(got, "approximate") || !strings.Contains(got, "not a git repo") {
+		t.Errorf("banner should disclose the fallback and its reason, got %q", got)
 	}
 }
 

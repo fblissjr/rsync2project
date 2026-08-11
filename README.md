@@ -86,12 +86,26 @@ Asking git also picks up `.git/info/exclude`, `core.excludesFile`, and
 nested `.gitignore` precedence for free.
 
 If the source is not a git work tree, or `git` isn't installed,
-rsync2project falls back to the older approximate filter and says so:
+rsync2project falls back to the older approximate filter and says which
+reason applied:
 
-    rsync2project: .gitignore on (approximate: rsync filter, no git repo) | ...
+    rsync2project: .gitignore on (approximate rsync filter: not a git repo) | ...
 
 The fallback changes which files transfer, which is why it's disclosed
 rather than silent.
+
+Two things worth knowing:
+
+- **`--delete` still protects ignored content that only exists at the
+  destination.** The git-derived set only covers paths present in the
+  source, so something synced earlier and since deleted locally would
+  otherwise be wiped. A receiver-side filter reading the destination's
+  own `.gitignore` prevents that, matching the deliberate choice not to
+  pass `--delete-excluded`.
+- **Ignored content inside a *nested* git repo is not filtered.** A
+  vendored checkout (a real repo, not a submodule) is opaque to
+  `git ls-files`, so its ignored directories are copied. This errs
+  toward copying too much, never too little; `--extra PATTERN` trims it.
 
 ### Seeing what moved
 

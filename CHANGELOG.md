@@ -6,7 +6,9 @@
 - `.gitignore` is now honored by asking git, not by replaying the file through rsync's filter engine. The old `--filter=':- .gitignore'` was an approximation that diverged in two ways, both of which *lost* files:
   - **Negation.** Git's `!pattern` re-includes a path. rsync's exclude-only dir-merge has no negation, so the line was read as an exclude of a file literally named `!pattern`, and anything a project deliberately un-ignored was silently dropped.
   - **Tracked files.** Git never ignores a file it is tracking, even when a pattern matches it. rsync has no notion of the index, so a committed file matching an ignore rule vanished from the copy — the worst failure mode for a backup tool.
-- Literal path metacharacters are escaped. An ignored file named `weird[1].txt` previously produced a character class that excluded `w1.txt` and left the actual file behind, so the exclude landed on the wrong file entirely.
+- Literal path metacharacters are escaped. An ignored file named `weird[1].txt` previously produced a character class that excluded `w1.txt` and left the actual file behind, so the exclude landed on the wrong file entirely. Backslashes are escaped only when the pattern also contains a wildcard, since rsync compares a wildcard-free pattern literally and never honors escapes in it.
+- `--delete` still protects ignored content that exists only at the destination. The git-derived set only covers paths present in the source, so content synced earlier and since deleted locally would have been wiped; a receiver-side (`:-r`) dir-merge reading the destination's own `.gitignore` restores that protection without touching the sending decision. This is also why `--from0` is not used for the pattern file — it would switch that merge file to NUL parsing and silently disable the protection.
+- Ignored paths containing a newline are skipped rather than written into the line-based pattern file, where the trailing fragment would become an unanchored rule free to exclude unrelated files anywhere in the tree. They are copied instead, and reported.
 - Git-derived patterns are anchored to the transfer root, which in the default (nest) mode sits one level above the source. An unanchored pattern matches nothing there, so the exclude would have silently no-opped.
 - Sources reached through a symlink (`/tmp` → `/private/tmp` on macOS, many home-directory setups) are resolved before being related to the repo root. Without this the path mapping fails and the ignore set comes back empty, which reads as "nothing is ignored".
 
@@ -16,8 +18,11 @@
 - The banner reports which mode ran: `on (via git)` or `on (approximate: rsync filter, no git repo)`.
 
 ### Changed
-- Sources that are not a git work tree, or systems without `git`, fall back to the previous approximate filter rather than failing. The fallback is disclosed in the banner and in `--show-excludes`, since it changes which files transfer.
+- Sources that are not a git work tree, or systems without `git`, fall back to the previous approximate filter rather than failing. The fallback is disclosed in the banner and in `--show-excludes`, since it changes which files transfer, and it names the specific reason — a source that sits inside an ignored directory makes `git ls-files` abort, and reporting that as "no git repo" would assert something false about the user's own project.
 - When an enclosing repo ignores the source directory itself, git has nothing to say about its contents. That is reported and everything is copied, rather than emitting a pattern that would exclude the entire transfer.
+
+### Known limitations
+- Ignored content inside a *nested* git repository (a vendored checkout, not a submodule) is no longer filtered: `git ls-files` does not descend into another repo, where the old dir-merge would have read its `.gitignore`. This fails safe — it copies more, never less — and `--extra PATTERN` trims it.
 
 ## [0.6.0]
 

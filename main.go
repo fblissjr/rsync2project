@@ -176,7 +176,14 @@ func resolveGitignoreFilter(source string, opts *options) gitignoreFilter {
 	}
 	set := loadGitIgnoreSet(source)
 	if !set.ok {
-		return gitignoreFilter{enabled: true}
+		return gitignoreFilter{enabled: true, fallbackReason: set.why}
+	}
+	if len(set.unrepresentable) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"rsync2project: note: %d ignored path(s) contain a newline and cannot be\n"+
+				"  expressed as an rsync pattern; they will be copied instead of skipped.\n"+
+				"  First: %q\n",
+			len(set.unrepresentable), set.unrepresentable[0])
 	}
 	if set.selfIgnored {
 		fmt.Fprintf(os.Stderr,
@@ -202,8 +209,10 @@ func gitignoreMode(gf gitignoreFilter) string {
 		return "off"
 	case gf.fromGit:
 		return "on (via git)"
+	case gf.fallbackReason != "":
+		return "on (approximate rsync filter: " + gf.fallbackReason + ")"
 	default:
-		return "on (approximate: rsync filter, no git repo)"
+		return "on (approximate rsync filter)"
 	}
 }
 
