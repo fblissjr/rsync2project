@@ -113,12 +113,33 @@ Every run prints, on stderr, where the tree is actually landing and which
 filter layers are live:
 
     rsync2project: /src/myapp -> user@host:/path/myapp
-    rsync2project: .gitignore off | builtin excludes off | 0 include, 0 exclude patterns
+    rsync2project: .gitignore on (via git) | builtin excludes on | 0 include, 37 exclude patterns
+    >f+++++++++ src/main.py
+    cd+++++++++ docs/
+
+The landing path is the resolved one, so a nested destination shows up
+before the transfer rather than after.
 
 By default the transfer itself is itemized per changed path (rsync's
 `-i` codes). `-n` always lists what *would* move, so it works as a real
 preview. `-q/--quiet` restores the older progress-bar-only output, which
 is quieter for very large transfers; `-n` still lists files under `-q`.
+
+When a file you expected doesn't arrive, `--show-excludes` is the direct
+answer — it names both layers and the exact paths git reports as ignored:
+
+    $ rsync2project --show-excludes src/myapp
+    Source:       /src/myapp
+    Detected:     python
+    Gitignore:    on (via git)
+    Builtin excl: on
+    Exclude .git: off
+    Gitignored (2):
+      /myapp/build/
+      /myapp/logs/app.log
+    Excludes (37):
+      .DS_Store
+      ...
 
 ### Named destinations
 
