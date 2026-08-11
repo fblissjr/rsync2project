@@ -8,13 +8,16 @@ import (
 	"strings"
 )
 
-const version = "0.5.1"
+const version = "0.6.0"
 
 type options struct {
 	dryRun        bool
 	verbose       bool
+	quiet         bool
 	deleteExtras  bool
 	noGitignore   bool
+	noExcludes    bool
+	all           bool
 	excludeVCS    bool
 	showExcludes  bool
 	listDests     bool
@@ -82,14 +85,11 @@ func main() {
 	}
 
 	types := detectProjectTypes(absSource)
-	excludes := buildExcludes(types, opts.excludeVCS)
 	userExcludes, err := loadUserExcludes()
 	if err != nil {
 		fail(err)
 	}
-	excludes = append(excludes, userExcludes...)
-	excludes = append(excludes, opts.extraExcludes...)
-	excludes = dedupe(excludes)
+	excludes := buildExcludeList(types, userExcludes, opts)
 
 	repoCfg, err := loadRepoConfig(absSource)
 	if err != nil {
@@ -127,6 +127,7 @@ func main() {
 			fmt.Printf("Detected:     (no known project markers)\n")
 		}
 		fmt.Printf("Gitignore:    %v\n", !opts.noGitignore)
+		fmt.Printf("Builtin excl: %v\n", !opts.noExcludes)
 		fmt.Printf("Exclude .git: %v\n", opts.excludeVCS)
 		if len(includes) > 0 {
 			fmt.Printf("Includes (%d):\n", len(includes))
@@ -146,9 +147,49 @@ func main() {
 		fail(err)
 	}
 
+	if !opts.quiet {
+		printRunBanner(absSource, destination, includes, excludes, opts)
+	}
+	warnNestCollision(absSource, destination, opts)
+
 	if err := runRsync(absSource, destination, includes, excludes, opts); err != nil {
 		fail(err)
 	}
+}
+
+// printRunBanner states where the tree is going and which filter layers are
+// live, in one line on stderr. Both facts were previously invisible: rsync
+// reports neither the nested landing path nor the reason a directory never
+// showed up at the far end.
+func printRunBanner(source, destination string, includes, excludes []string, opts *options) {
+	prefix := "rsync2project:"
+	if opts.dryRun {
+		prefix = "dry-run:"
+	}
+	fmt.Fprintf(os.Stderr, "%s %s -> %s\n", prefix, source, effectiveDest(source, destination, opts.contents))
+	fmt.Fprintf(os.Stderr, "%s .gitignore %s | builtin excludes %s | %d include, %d exclude patterns\n",
+		prefix, onOff(!opts.noGitignore), onOff(!opts.noExcludes), len(includes), len(excludes))
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+// warnNestCollision flags a destination whose last segment already repeats
+// the source name, which nests the project inside itself. See nestCollides.
+func warnNestCollision(source, destination string, opts *options) {
+	if !nestCollides(source, destination, opts.contents) {
+		return
+	}
+	base := filepath.Base(source)
+	fmt.Fprintf(os.Stderr,
+		"rsync2project: note: destination already ends in %q and --contents was not given.\n"+
+			"  Files will land in %s/, not %s/.\n"+
+			"  Pass --contents to sync into the destination directly.\n",
+		base, effectiveDest(source, destination, false), strings.TrimRight(destination, "/"))
 }
 
 func parseFlags() *options {
@@ -158,8 +199,12 @@ func parseFlags() *options {
 	flag.BoolVar(&opts.dryRun, "n", false, "")
 	flag.BoolVar(&opts.verbose, "verbose", false, "verbose rsync output; also prints the invoked command")
 	flag.BoolVar(&opts.verbose, "v", false, "")
+	flag.BoolVar(&opts.quiet, "quiet", false, "progress bar only, no per-file list (the pre-0.6 default)")
+	flag.BoolVar(&opts.quiet, "q", false, "")
 	flag.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
 	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
+	flag.BoolVar(&opts.noExcludes, "no-excludes", false, "don't apply the builtin/project-type/user exclude lists")
+	flag.BoolVar(&opts.all, "all", false, "copy everything: implies --no-gitignore and --no-excludes")
 	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
 	flag.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
 	flag.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to ~/.config/rsync2project/repos/<basename>.conf for reuse")
@@ -173,6 +218,14 @@ func parseFlags() *options {
 
 	flag.Usage = usage
 	flag.Parse()
+
+	// --all is pure sugar over the two precise flags, resolved here so
+	// every downstream consumer (including --show-excludes) sees a single
+	// consistent filter state instead of testing three booleans.
+	if opts.all {
+		opts.noGitignore = true
+		opts.noExcludes = true
+	}
 	return opts
 }
 
@@ -214,11 +267,19 @@ destination (rsync's native behavior). For example,
 creates /backup/myapp/. Pass --contents to spill the source's files
 directly into the destination without the intermediate directory.
 
+Filtering: two independent layers drop files. The project's .gitignore, and
+a builtin list of regenerable junk (node_modules/, __pycache__/, .venv/,
+target/, plus per-project-type additions). --no-gitignore turns off only the
+first; use --all to turn off both and copy the tree verbatim.
+
 Options:
-  -n, --dry-run         Preview without transferring
+  -n, --dry-run         Preview without transferring (always lists files)
   -v, --verbose         Verbose rsync output (also prints invoked command)
+  -q, --quiet           Progress bar only, no per-file list
       --delete          Delete files on destination not present on source
       --no-gitignore    Don't use .gitignore as an rsync filter
+      --no-excludes     Don't apply the builtin/project-type/user exclude lists
+      --all             Copy everything (--no-gitignore + --no-excludes)
       --no-vcs          Exclude .git/.hg/.svn
       --contents        Copy source contents into dest (don't nest by source name)
       --show-excludes   Print exclude list and exit
@@ -236,6 +297,7 @@ Subcommands:
   config path           Print the rsync2project config directory
 
 Examples:
+  rsync2project --contents --all . user@host:/path/myapp
   rsync2project ~/code/myapp user@host:/path/
   rsync2project --dest name ~/code/myapp
   rsync2project -n --show-excludes ~/code/myapp

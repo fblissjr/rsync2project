@@ -171,6 +171,75 @@ func TestIntegrationRepoIncludeBeatsGitignore(t *testing.T) {
 	}
 }
 
+// TestIntegrationAllCopiesEverything covers the case --no-gitignore alone
+// does not: a project whose gitignored directories overlap the builtin
+// exclude tables. --no-gitignore lifts only the .gitignore layer, so
+// __pycache__/ and .venv/ still vanish; --all lifts both and the tree
+// arrives verbatim.
+func TestIntegrationAllCopiesEverything(t *testing.T) {
+	requireRsync(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	files := map[string]string{
+		"requirements.txt":   "torch\n",
+		".gitignore":         "models/\noutput/\n__pycache__/\n.venv/\n",
+		"nodes.py":           "print('hi')\n",
+		"models/weights.bin": "fake weights",
+		"output/run1.png":    "fake png",
+		"__pycache__/a.pyc":  "compiled",
+		".venv/bin/python":   "regenerable",
+	}
+	types := detectProjectTypes(setupFakeProject(t, files))
+
+	// Overlapping with .gitignore only: models/ and output/ come back,
+	// but the builtin tables still swallow __pycache__/ and .venv/.
+	srcA := setupFakeProject(t, files)
+	dstA := t.TempDir()
+	optsA := &options{noGitignore: true}
+	if err := runRsync(srcA, dstA+"/", nil, buildExcludeList(types, nil, optsA), optsA); err != nil {
+		t.Fatalf("runRsync (--no-gitignore): %v", err)
+	}
+	nestA := filepath.Join(dstA, "testproj")
+	assertPresent(t, nestA, "--no-gitignore", []string{"models/weights.bin", "output/run1.png"})
+	assertAbsent(t, nestA, "--no-gitignore", []string{"__pycache__", ".venv"})
+
+	// --all lifts both layers: nothing is filtered out.
+	srcB := setupFakeProject(t, files)
+	dstB := t.TempDir()
+	optsB := &options{noGitignore: true, noExcludes: true}
+	if err := runRsync(srcB, dstB+"/", nil, buildExcludeList(types, nil, optsB), optsB); err != nil {
+		t.Fatalf("runRsync (--all): %v", err)
+	}
+	nestB := filepath.Join(dstB, "testproj")
+	assertPresent(t, nestB, "--all", []string{
+		"nodes.py",
+		"models/weights.bin",
+		"output/run1.png",
+		"__pycache__/a.pyc",
+		".venv/bin/python",
+	})
+}
+
+func assertPresent(t *testing.T, root, label string, rels []string) {
+	t.Helper()
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Errorf("%s: expected %s at destination: %v", label, rel, err)
+		}
+	}
+}
+
+func assertAbsent(t *testing.T, root, label string, rels []string) {
+	t.Helper()
+	for _, rel := range rels {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			t.Errorf("%s: expected %s to be excluded, but it exists", label, rel)
+		} else if !os.IsNotExist(err) {
+			t.Errorf("%s: unexpected error checking %s: %v", label, rel, err)
+		}
+	}
+}
+
 // TestRepoConfigRoundTrip verifies save→load produces equivalent config.
 func TestRepoConfigRoundTrip(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

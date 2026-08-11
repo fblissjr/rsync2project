@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0]
+
+### Added
+- `--all` — copy the tree verbatim. Implies `--no-gitignore` and `--no-excludes`. This is the flag for "I want the gitignored folders too"; `--no-gitignore` alone never was.
+- `--no-excludes` — drop the builtin, project-type, and user `excludes`-file layers while leaving the `.gitignore` filter alone.
+- `-q` / `--quiet` — progress-bar-only output (the pre-0.6 default) for very large transfers.
+- Run banner on stderr: the source, the path the tree will *actually* land in, and which filter layers are live. Neither fact was previously observable — rsync reports neither the nested landing path nor why a directory failed to appear at the far end.
+- Note when the destination's last segment already repeats the source basename (`rsync2project . host:/path/myapp` → `/path/myapp/myapp/`), pointing at `--contents`. A warning, not an error: `myapp/myapp/` is a legal layout.
+
+### Changed
+- Default output now itemizes each changed path (`-i`) instead of showing only a progress counter. A run that transferred nothing used to look identical to one that transferred everything.
+- `-n` always lists what would move, including under `-q`. A preview whose file list is suppressed has no content left.
+- `--no-vcs` and `--extra PATTERN` survive `--no-excludes`/`--all` — both are explicit requests made on the same command line, so "copy everything" does not silently undo them.
+- `--show-excludes` reports the builtin-exclude layer state alongside the gitignore state.
+
+### Fixed
+- `--no-gitignore` silently kept applying ~35 builtin excludes, so gitignored directories that overlapped that list (`__pycache__/`, `.venv/`, `node_modules/`, `target/`, and `build/`+`dist/` on Python projects) still never transferred, with nothing printed to say why. The two layers are now separately controllable and their state is reported on every run.
+
 ## [0.5.1]
 
 ### Added

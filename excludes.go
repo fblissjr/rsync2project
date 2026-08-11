@@ -91,3 +91,26 @@ func buildExcludes(detected []projectType, excludeVCS bool) []string {
 	}
 	return out
 }
+
+// buildExcludeList assembles the exclude list for one run, layering the
+// curated tables, the user's global excludes file, and per-run --extra
+// patterns.
+//
+// Under --no-excludes (and therefore --all) the first two layers drop out
+// entirely, but --no-vcs and --extra survive: both are explicit requests
+// made on the same command line, and "copy everything the filters would
+// have dropped" should not quietly undo something the user just asked for
+// in the very same invocation.
+func buildExcludeList(detected []projectType, userExcludes []string, opts *options) []string {
+	var out []string
+	if opts.noExcludes {
+		if opts.excludeVCS {
+			out = append(out, vcsExclude...)
+		}
+	} else {
+		out = append(out, buildExcludes(detected, opts.excludeVCS)...)
+		out = append(out, userExcludes...)
+	}
+	out = append(out, opts.extraExcludes...)
+	return dedupe(out)
+}

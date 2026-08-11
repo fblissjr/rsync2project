@@ -63,6 +63,113 @@ func TestLooksRemote(t *testing.T) {
 	}
 }
 
+func TestDestBase(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"/srv/backup/myapp", "myapp"},
+		{"/srv/backup/myapp/", "myapp"},
+		{"/srv/backup/myapp///", "myapp"},
+		{"user@host:/srv/backup/myapp", "myapp"},
+		{"host:myapp", "myapp"},
+		{"host:", ""},
+		{"rsync://host/mod/myapp", "myapp"},
+		{"/", ""},
+		{"myapp", "myapp"},
+	}
+	for _, c := range cases {
+		if got := destBase(c.in); got != c.want {
+			t.Errorf("destBase(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestEffectiveDest(t *testing.T) {
+	cases := []struct {
+		source, dest string
+		contents     bool
+		want         string
+	}{
+		// Default nests the source dir under the destination.
+		{"/src/myapp", "/srv/backup", false, "/srv/backup/myapp"},
+		{"/src/myapp", "/srv/backup/", false, "/srv/backup/myapp"},
+		{"/src/myapp", "user@host:/srv/backup/", false, "user@host:/srv/backup/myapp"},
+		// The doubling case: dest already names the project.
+		{"/src/myapp", "user@host:/srv/myapp", false, "user@host:/srv/myapp/myapp"},
+		// --contents spills into the destination as given.
+		{"/src/myapp", "/srv/backup/", true, "/srv/backup/"},
+		// A bare "host:" means the remote home; appending a slash would
+		// wrongly make the target absolute.
+		{"/src/myapp", "host:", false, "host:myapp"},
+	}
+	for _, c := range cases {
+		if got := effectiveDest(c.source, c.dest, c.contents); got != c.want {
+			t.Errorf("effectiveDest(%q, %q, %v) = %q, want %q",
+				c.source, c.dest, c.contents, got, c.want)
+		}
+	}
+}
+
+func TestNestCollides(t *testing.T) {
+	cases := []struct {
+		source, dest string
+		contents     bool
+		want         bool
+	}{
+		{"/src/myapp", "user@host:/srv/myapp", false, true},
+		{"/src/myapp", "user@host:/srv/myapp/", false, true},
+		// --contents is the fix, so it must never warn.
+		{"/src/myapp", "user@host:/srv/myapp", true, false},
+		// Ordinary "back up into a parent dir" must stay quiet.
+		{"/src/myapp", "user@host:/srv/backup/", false, false},
+		{"/src/myapp", "/srv/backup", false, false},
+		// Near-miss names are not collisions.
+		{"/src/myapp", "/srv/myapp2", false, false},
+	}
+	for _, c := range cases {
+		if got := nestCollides(c.source, c.dest, c.contents); got != c.want {
+			t.Errorf("nestCollides(%q, %q, %v) = %v, want %v",
+				c.source, c.dest, c.contents, got, c.want)
+		}
+	}
+}
+
+func TestBuildExcludeListNoExcludes(t *testing.T) {
+	user := []string{"secrets/"}
+
+	full := buildExcludeList([]projectType{ptPython}, user, &options{extraExcludes: stringSlice{"scratch/"}})
+	for _, want := range []string{"node_modules/", "__pycache__/", "build/", "secrets/", "scratch/"} {
+		if !slices.Contains(full, want) {
+			t.Errorf("default run: expected %q in %v", want, full)
+		}
+	}
+
+	// --no-excludes drops the curated tables and the user's global file...
+	bare := buildExcludeList([]projectType{ptPython}, user, &options{
+		noExcludes:    true,
+		extraExcludes: stringSlice{"scratch/"},
+	})
+	for _, unwanted := range []string{"node_modules/", "__pycache__/", "build/", "secrets/"} {
+		if slices.Contains(bare, unwanted) {
+			t.Errorf("--no-excludes: did not expect %q in %v", unwanted, bare)
+		}
+	}
+	// ...but must not undo --extra, which is an explicit same-run request.
+	if !slices.Contains(bare, "scratch/") {
+		t.Errorf("--no-excludes: expected --extra pattern to survive; got %v", bare)
+	}
+
+	// Same for --no-vcs: asked for on this command line, so it stands.
+	vcs := buildExcludeList(nil, nil, &options{noExcludes: true, excludeVCS: true})
+	if !slices.Contains(vcs, ".git/") {
+		t.Errorf("--no-excludes --no-vcs: expected .git/ to survive; got %v", vcs)
+	}
+	if noVCS := buildExcludeList(nil, nil, &options{noExcludes: true}); len(noVCS) != 0 {
+		t.Errorf("--no-excludes alone should yield an empty list; got %v", noVCS)
+	}
+}
+
 func TestDedupe(t *testing.T) {
 	got := dedupe([]string{"a", "b", "a", "c", "b"})
 	want := []string{"a", "b", "c"}

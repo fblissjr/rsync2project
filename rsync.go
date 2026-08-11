@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -18,12 +19,24 @@ func runRsync(source, destination string, includes, excludes []string, opts *opt
 		"-h",        // human-readable sizes
 		"--partial", // keep partially transferred files to allow resume
 	}
-	if opts.verbose {
-		args = append(args, "-v", "--stats")
-	} else {
+	// Output mode. The default itemizes every changed path: a sync you can't
+	// see is a sync you can't trust, and the old progress-only default
+	// printed a byte counter and nothing else — a run that transferred
+	// nothing looked identical to one that transferred everything.
+	// --info=progress2 is deliberately not combined with -i: the progress
+	// line rewrites itself with \r and shreds the itemized output.
+	switch {
+	case opts.verbose:
+		args = append(args, "-v", "-i", "--stats")
+	case opts.quiet && !opts.dryRun:
 		args = append(args, "--info=progress2,stats1")
+	default:
+		args = append(args, "-i", "--info=stats1")
 	}
 	if opts.dryRun {
+		// --quiet never suppresses the dry-run listing. A preview whose
+		// whole purpose is "show me what would move" has nothing left if
+		// the file list is dropped.
 		args = append(args, "--dry-run")
 	}
 	if opts.deleteExtras {
@@ -72,6 +85,72 @@ func runRsync(source, destination string, includes, excludes []string, opts *opt
 		return fmt.Errorf("rsync failed: %w", err)
 	}
 	return nil
+}
+
+// destPathPart strips an rsync target's transport/host prefix and returns
+// just the path portion, so path-shape checks work identically for local
+// paths, user@host:path, and rsync:// URLs.
+func destPathPart(dest string) string {
+	if i := strings.Index(dest, "://"); i >= 0 {
+		rest := dest[i+3:]
+		if j := strings.IndexByte(rest, '/'); j >= 0 {
+			return rest[j:]
+		}
+		return ""
+	}
+	colon := strings.IndexByte(dest, ':')
+	slash := strings.IndexByte(dest, '/')
+	if colon >= 0 && (slash < 0 || colon < slash) {
+		return dest[colon+1:]
+	}
+	return dest
+}
+
+// destBase returns the final path segment of a destination, ignoring any
+// trailing slashes (which rsync ignores for the destination too).
+func destBase(dest string) string {
+	p := strings.TrimRight(destPathPart(dest), "/")
+	if p == "" {
+		return ""
+	}
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// effectiveDest reports where the source tree actually lands: the
+// destination itself under --contents, otherwise destination/<basename>
+// because rsync nests a source given without a trailing slash. Printed in
+// the run banner so the landing path is visible before the transfer rather
+// than hunted for afterwards.
+func effectiveDest(source, dest string, contents bool) string {
+	if contents {
+		return dest
+	}
+	base := filepath.Base(source)
+	// "host:" (remote home) has no path to join onto; appending a slash
+	// would turn a home-relative target into an absolute one.
+	if strings.HasSuffix(dest, ":") {
+		return dest + base
+	}
+	return strings.TrimRight(dest, "/") + "/" + base
+}
+
+// nestCollides reports the common footgun of naming the project twice:
+// `rsync2project . host:/path/myapp` nests, so the files land in
+// .../myapp/myapp/ rather than in the directory the user pointed at.
+// This is correct rsync behavior and a myapp/myapp/ layout is legal, so
+// callers warn and proceed rather than refusing.
+func nestCollides(source, dest string, contents bool) bool {
+	if contents {
+		return false
+	}
+	base := filepath.Base(source)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return false
+	}
+	return destBase(dest) == base
 }
 
 // looksRemote heuristically decides whether dest is a remote rsync target, so

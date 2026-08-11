@@ -19,18 +19,63 @@ Or `go build -o rsync2project .` and drop the binary on your `PATH`.
     rsync2project --dest NAME <source>
     rsync2project -n --show-excludes <source>
 
-Flags: `-n`, `-v`, `--delete`, `--no-gitignore`, `--no-vcs`,
-`--show-excludes`, `--extra PATTERN`, `--include PATTERN`,
-`--save-config`, `-d/--dest NAME`, `--contents`, `--list-dests`,
-`--version`.
+Flags: `-n`, `-v`, `-q/--quiet`, `--delete`, `--no-gitignore`,
+`--no-excludes`, `--all`, `--no-vcs`, `--show-excludes`,
+`--extra PATTERN`, `--include PATTERN`, `--save-config`,
+`-d/--dest NAME`, `--contents`, `--list-dests`, `--version`.
 
 Subcommands: `dest`, `repo`, `config path` — see sections below or
 `rsync2project <subcmd> --help`.
 
 By default the source directory is preserved at the destination (rsync's
-native behavior). `rsync2project ~/code/myapp /backup/` creates
+native behavior). `rsync2project src/myapp /backup/` creates
 `/backup/myapp/`. Pass `--contents` to spill the source's files directly
 into the destination without the intermediate directory.
+
+If the destination's last segment already repeats the source name — as in
+`rsync2project . user@host:/path/myapp`, which lands the tree in
+`/path/myapp/myapp/` — the run prints a note pointing at `--contents`
+before starting. It's a note, not an error: a genuine `myapp/myapp/`
+layout is legal, so the transfer proceeds.
+
+### Two filter layers
+
+Files get dropped by two independent mechanisms, and turning off one does
+not turn off the other:
+
+| Layer | What it drops | Turn off with |
+| --- | --- | --- |
+| The project's `.gitignore` | Whatever the repo ignores | `--no-gitignore` |
+| Builtin excludes | Regenerable junk: `node_modules/`, `__pycache__/`, `.venv/`, `target/`, `.gradle/`, plus per-project-type additions like `build/`+`dist/` for Python — and your own `excludes` file | `--no-excludes` |
+
+`--all` turns off both. That is the flag for "copy the tree verbatim":
+
+    rsync2project --contents --all . user@host:/path/myapp
+
+`--no-gitignore` on its own is a common trap. In a Python project whose
+`.gitignore` lists `models/ output/ __pycache__/ .venv/`, it brings back
+`models/` and `output/` but *not* `__pycache__/` or `.venv/` — those are
+in the builtin list, which is still live. Use `--all` when you mean
+everything, or `--include PATTERN` when you mean a specific directory.
+
+`--all` deliberately does not override `--no-vcs` or `--extra PATTERN`:
+both are explicit requests made on the same command line.
+
+`--show-excludes` prints the resolved state without transferring
+anything.
+
+### Seeing what moved
+
+Every run prints, on stderr, where the tree is actually landing and which
+filter layers are live:
+
+    rsync2project: /src/myapp -> user@host:/path/myapp
+    rsync2project: .gitignore off | builtin excludes off | 0 include, 0 exclude patterns
+
+By default the transfer itself is itemized per changed path (rsync's
+`-i` codes). `-n` always lists what *would* move, so it works as a real
+preview. `-q/--quiet` restores the older progress-bar-only output, which
+is quieter for very large transfers; `-n` still lists files under `-q`.
 
 ### Named destinations
 
@@ -102,6 +147,10 @@ nothing).
 that `.gitignore` or the baseline excludes would otherwise drop. Useful
 for personal backups: `models/`, `data/raw/`, and `.env` files stay out
 of GitHub but still land on your NAS.
+
+Prefer `--include` over `--all` when you want a named directory back but
+still want the junk filtered — and `--save-config` so you only decide
+once.
 
 ### Extra global excludes
 
