@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,7 +55,7 @@ func TestIntegrationSyncDefault(t *testing.T) {
 	opts := &options{}
 	excludes := buildExcludes(types, opts.excludeVCS)
 
-	if err := runRsync(src, dst+"/", nil, excludes, opts); err != nil {
+	if err := runRsync(src, dst+"/", nil, excludes, resolveGitignoreFilter(src, opts), opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -94,7 +95,7 @@ func TestIntegrationContents(t *testing.T) {
 	dst := t.TempDir()
 
 	opts := &options{contents: true}
-	if err := runRsync(src, dst+"/", nil, nil, opts); err != nil {
+	if err := runRsync(src, dst+"/", nil, nil, resolveGitignoreFilter(src, opts), opts); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -142,7 +143,7 @@ func TestIntegrationRepoIncludeBeatsGitignore(t *testing.T) {
 	includes := expandIncludePatterns(cfg.rawIncludes)
 	excludes := buildExcludes(detectProjectTypes(src), false)
 
-	if err := runRsync(src, dst+"/", includes, excludes, &options{}); err != nil {
+	if err := runRsync(src, dst+"/", includes, excludes, resolveGitignoreFilter(src, &options{}), &options{}); err != nil {
 		t.Fatalf("runRsync: %v", err)
 	}
 
@@ -196,7 +197,7 @@ func TestIntegrationAllCopiesEverything(t *testing.T) {
 	srcA := setupFakeProject(t, files)
 	dstA := t.TempDir()
 	optsA := &options{noGitignore: true}
-	if err := runRsync(srcA, dstA+"/", nil, buildExcludeList(types, nil, optsA), optsA); err != nil {
+	if err := runRsync(srcA, dstA+"/", nil, buildExcludeList(types, nil, optsA), resolveGitignoreFilter(srcA, optsA), optsA); err != nil {
 		t.Fatalf("runRsync (--no-gitignore): %v", err)
 	}
 	nestA := filepath.Join(dstA, "testproj")
@@ -207,7 +208,7 @@ func TestIntegrationAllCopiesEverything(t *testing.T) {
 	srcB := setupFakeProject(t, files)
 	dstB := t.TempDir()
 	optsB := &options{noGitignore: true, noExcludes: true}
-	if err := runRsync(srcB, dstB+"/", nil, buildExcludeList(types, nil, optsB), optsB); err != nil {
+	if err := runRsync(srcB, dstB+"/", nil, buildExcludeList(types, nil, optsB), resolveGitignoreFilter(srcB, optsB), optsB); err != nil {
 		t.Fatalf("runRsync (--all): %v", err)
 	}
 	nestB := filepath.Join(dstB, "testproj")
@@ -218,6 +219,156 @@ func TestIntegrationAllCopiesEverything(t *testing.T) {
 		"__pycache__/a.pyc",
 		".venv/bin/python",
 	})
+}
+
+func requireGit(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available on PATH; skipping git-backed test")
+	}
+}
+
+// setupGitRepo builds a real repo so the git-backed ignore path is
+// exercised for real rather than mocked. tracked paths are force-added, so
+// a file can be both committed and matched by an ignore rule — the case
+// that distinguishes git's semantics from rsync's.
+func setupGitRepo(t *testing.T, files map[string]string, tracked []string) string {
+	t.Helper()
+	// Neutralize the developer's own git config: a global core.excludesFile
+	// would otherwise leak into the ignore set and make results
+	// machine-dependent.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	src := setupFakeProject(t, files)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = src
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run(append([]string{"add", "-f", "--"}, tracked...)...)
+	run("-c", "user.email=test@example.invalid", "-c", "user.name=test",
+		"commit", "-qm", "init")
+	return src
+}
+
+// TestIntegrationGitignoreFidelity pins the two ways rsync's dir-merge
+// approximation diverges from git, both of which silently lose files:
+// a negated ("!") re-include, and a tracked file that an ignore rule
+// matches. Git keeps both; the old --filter=':- .gitignore' dropped both.
+func TestIntegrationGitignoreFidelity(t *testing.T) {
+	requireRsync(t)
+	requireGit(t)
+
+	files := map[string]string{
+		".gitignore":              "*.log\n!logs/KEEP.log\nbuild/\n",
+		"src/main.py":             "print('hi')\n",
+		"logs/app.log":            "noise",
+		"logs/KEEP.log":           "deliberately un-ignored",
+		"build/out.o":             "artifact",
+		"tracked-but-ignored.log": "committed anyway",
+	}
+	tracked := []string{".gitignore", "src/main.py", "tracked-but-ignored.log"}
+
+	// Both path shapes, because the git-derived patterns are anchored to
+	// the transfer root and nest mode shifts every path under the source
+	// basename. An unanchored pattern would silently no-op in nest mode.
+	for _, tc := range []struct {
+		name     string
+		contents bool
+	}{{"nest", false}, {"contents", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := setupGitRepo(t, files, tracked)
+			dst := t.TempDir()
+			opts := &options{contents: tc.contents, excludeVCS: true}
+
+			gf := resolveGitignoreFilter(src, opts)
+			if !gf.fromGit {
+				t.Fatal("expected the git-backed ignore path for a real repo")
+			}
+			if err := runRsync(src, dst+"/", nil, buildExcludeList(nil, nil, opts), gf, opts); err != nil {
+				t.Fatalf("runRsync: %v", err)
+			}
+
+			root := dst
+			if !tc.contents {
+				root = filepath.Join(dst, "testproj")
+			}
+			assertPresent(t, root, "git-backed", []string{
+				"src/main.py",
+				".gitignore",
+				"logs/KEEP.log",           // negated re-include
+				"tracked-but-ignored.log", // tracked, so never ignored
+			})
+			assertAbsent(t, root, "git-backed", []string{
+				"logs/app.log",
+				"build",
+			})
+		})
+	}
+}
+
+// TestIntegrationGitignoreSubdirOfRepo covers syncing one package out of a
+// larger repo. git reports repo-root-relative paths, which have to be
+// rebased onto the source before they mean anything to rsync.
+func TestIntegrationGitignoreSubdirOfRepo(t *testing.T) {
+	requireRsync(t)
+	requireGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	repo := setupFakeProject(t, map[string]string{
+		".gitignore":              "dist/\n",
+		"packages/api/server.go":  "package main\n",
+		"packages/api/dist/bin":   "artifact",
+		"packages/web/index.html": "<html>\n",
+	})
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	run("add", "-f", "--", ".gitignore", "packages/api/server.go", "packages/web/index.html")
+	run("-c", "user.email=test@example.invalid", "-c", "user.name=test", "commit", "-qm", "init")
+
+	src := filepath.Join(repo, "packages", "api")
+	dst := t.TempDir()
+	opts := &options{excludeVCS: true}
+	gf := resolveGitignoreFilter(src, opts)
+	if !gf.fromGit {
+		t.Fatal("expected the git-backed ignore path")
+	}
+	if err := runRsync(src, dst+"/", nil, buildExcludeList(nil, nil, opts), gf, opts); err != nil {
+		t.Fatalf("runRsync: %v", err)
+	}
+
+	nest := filepath.Join(dst, "api")
+	assertPresent(t, nest, "subdir-of-repo", []string{"server.go"})
+	assertAbsent(t, nest, "subdir-of-repo", []string{"dist"})
+}
+
+// TestGitIgnoreSetFallback verifies a non-repo source degrades to the
+// approximate filter instead of erroring or silently dropping the filter.
+func TestGitIgnoreSetFallback(t *testing.T) {
+	src := setupFakeProject(t, map[string]string{".gitignore": "*.log\n"})
+	if set := loadGitIgnoreSet(src); set.ok {
+		t.Errorf("expected ok=false for a non-repo source, got %+v", set)
+	}
+	gf := resolveGitignoreFilter(src, &options{})
+	if !gf.enabled || gf.fromGit {
+		t.Errorf("expected the approximate filter to stay enabled, got %+v", gf)
+	}
+	if got := gitignoreMode(gf); !strings.Contains(got, "approximate") {
+		t.Errorf("banner should disclose the fallback, got %q", got)
+	}
 }
 
 func assertPresent(t *testing.T, root, label string, rels []string) {

@@ -3,11 +3,14 @@
 A small Go wrapper around `rsync` that omits regenerable junk
 (`node_modules/`, `__pycache__/`, `.venv/`, `target/`, `.gradle/`, build
 caches, OS and editor cruft) when copying code projects between machines.
-Honors each project's `.gitignore`.
+Honors each project's `.gitignore` by asking git, so negations and
+tracked-but-matched files behave exactly as they do in git.
 
 ## Install
 
-Requires `rsync` on both source and destination.
+Requires `rsync` on both source and destination. `git` is optional — used
+where available to resolve `.gitignore` exactly, with a documented
+fallback when it isn't.
 
     go install github.com/fblissjr/rsync2project@latest
 
@@ -45,7 +48,7 @@ not turn off the other:
 
 | Layer | What it drops | Turn off with |
 | --- | --- | --- |
-| The project's `.gitignore` | Whatever the repo ignores | `--no-gitignore` |
+| The project's `.gitignore` | Exactly what `git` ignores | `--no-gitignore` |
 | Builtin excludes | Regenerable junk: `node_modules/`, `__pycache__/`, `.venv/`, `target/`, `.gradle/`, plus per-project-type additions like `build/`+`dist/` for Python — and your own `excludes` file | `--no-excludes` |
 
 `--all` turns off both. That is the flag for "copy the tree verbatim":
@@ -62,7 +65,33 @@ everything, or `--include PATTERN` when you mean a specific directory.
 both are explicit requests made on the same command line.
 
 `--show-excludes` prints the resolved state without transferring
-anything.
+anything, including the exact list of paths git reports as ignored.
+
+### How `.gitignore` is honored
+
+The ignore set comes from git itself (`git ls-files --others --ignored`),
+not from replaying `.gitignore` through rsync's own filter engine. That
+matters because rsync's filters are not gitignore, and the differences
+lose files rather than copy extra ones:
+
+- **Negation.** `!keep.log` re-includes a path in git. rsync's
+  exclude-only dir-merge has no negation and reads the line as an
+  exclude of a file literally named `!keep.log`, so anything you
+  deliberately un-ignored disappears.
+- **Tracked files.** Git never ignores a file it is tracking, even when
+  a pattern matches it. rsync has no notion of the index, so a committed
+  file matching an ignore rule silently vanishes from the copy.
+
+Asking git also picks up `.git/info/exclude`, `core.excludesFile`, and
+nested `.gitignore` precedence for free.
+
+If the source is not a git work tree, or `git` isn't installed,
+rsync2project falls back to the older approximate filter and says so:
+
+    rsync2project: .gitignore on (approximate: rsync filter, no git repo) | ...
+
+The fallback changes which files transfer, which is why it's disclosed
+rather than silent.
 
 ### Seeing what moved
 

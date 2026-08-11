@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 type options struct {
 	dryRun        bool
@@ -91,6 +91,8 @@ func main() {
 	}
 	excludes := buildExcludeList(types, userExcludes, opts)
 
+	gf := resolveGitignoreFilter(absSource, opts)
+
 	repoCfg, err := loadRepoConfig(absSource)
 	if err != nil {
 		fail(err)
@@ -126,9 +128,17 @@ func main() {
 		} else {
 			fmt.Printf("Detected:     (no known project markers)\n")
 		}
-		fmt.Printf("Gitignore:    %v\n", !opts.noGitignore)
-		fmt.Printf("Builtin excl: %v\n", !opts.noExcludes)
-		fmt.Printf("Exclude .git: %v\n", opts.excludeVCS)
+		fmt.Printf("Gitignore:    %s\n", gitignoreMode(gf))
+		fmt.Printf("Builtin excl: %s\n", onOff(!opts.noExcludes))
+		fmt.Printf("Exclude .git: %s\n", onOff(opts.excludeVCS))
+		// The git-derived set is the answer to "why didn't this file
+		// copy?", so print it rather than making the user re-derive it.
+		if gf.enabled && gf.fromGit {
+			fmt.Printf("Gitignored (%d):\n", len(gf.excludes))
+			for _, p := range gf.excludes {
+				fmt.Println("  " + p)
+			}
+		}
 		if len(includes) > 0 {
 			fmt.Printf("Includes (%d):\n", len(includes))
 			for _, i := range includes {
@@ -148,12 +158,52 @@ func main() {
 	}
 
 	if !opts.quiet {
-		printRunBanner(absSource, destination, includes, excludes, opts)
+		printRunBanner(absSource, destination, includes, excludes, gf, opts)
 	}
 	warnNestCollision(absSource, destination, opts)
 
-	if err := runRsync(absSource, destination, includes, excludes, opts); err != nil {
+	if err := runRsync(absSource, destination, includes, excludes, gf, opts); err != nil {
 		fail(err)
+	}
+}
+
+// resolveGitignoreFilter decides how .gitignore gets honored for this run
+// and reports the fallback, since "git couldn't answer" changes which files
+// transfer and the user has no other way to notice.
+func resolveGitignoreFilter(source string, opts *options) gitignoreFilter {
+	if opts.noGitignore {
+		return gitignoreFilter{}
+	}
+	set := loadGitIgnoreSet(source)
+	if !set.ok {
+		return gitignoreFilter{enabled: true}
+	}
+	if set.selfIgnored {
+		fmt.Fprintf(os.Stderr,
+			"rsync2project: note: an enclosing git repo ignores %s itself, so git\n"+
+				"  reported nothing about its contents. Copying everything under it.\n"+
+				"  Use --extra PATTERN to trim, or --all to silence .gitignore entirely.\n",
+			filepath.Base(source))
+	}
+	return gitignoreFilter{
+		enabled:  true,
+		fromGit:  true,
+		excludes: set.rsyncExcludes(source, opts.contents),
+	}
+}
+
+// gitignoreMode renders the filter state for the banner. The git/approx
+// distinction is worth surfacing: the approximate path silently drops
+// negated and tracked-but-matched files, so knowing which one ran explains
+// an otherwise baffling missing file.
+func gitignoreMode(gf gitignoreFilter) string {
+	switch {
+	case !gf.enabled:
+		return "off"
+	case gf.fromGit:
+		return "on (via git)"
+	default:
+		return "on (approximate: rsync filter, no git repo)"
 	}
 }
 
@@ -161,14 +211,14 @@ func main() {
 // live, in one line on stderr. Both facts were previously invisible: rsync
 // reports neither the nested landing path nor the reason a directory never
 // showed up at the far end.
-func printRunBanner(source, destination string, includes, excludes []string, opts *options) {
+func printRunBanner(source, destination string, includes, excludes []string, gf gitignoreFilter, opts *options) {
 	prefix := "rsync2project:"
 	if opts.dryRun {
 		prefix = "dry-run:"
 	}
 	fmt.Fprintf(os.Stderr, "%s %s -> %s\n", prefix, source, effectiveDest(source, destination, opts.contents))
 	fmt.Fprintf(os.Stderr, "%s .gitignore %s | builtin excludes %s | %d include, %d exclude patterns\n",
-		prefix, onOff(!opts.noGitignore), onOff(!opts.noExcludes), len(includes), len(excludes))
+		prefix, gitignoreMode(gf), onOff(!opts.noExcludes), len(includes), len(excludes))
 }
 
 func onOff(b bool) string {

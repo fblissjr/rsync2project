@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.0]
+
+### Fixed
+- `.gitignore` is now honored by asking git, not by replaying the file through rsync's filter engine. The old `--filter=':- .gitignore'` was an approximation that diverged in two ways, both of which *lost* files:
+  - **Negation.** Git's `!pattern` re-includes a path. rsync's exclude-only dir-merge has no negation, so the line was read as an exclude of a file literally named `!pattern`, and anything a project deliberately un-ignored was silently dropped.
+  - **Tracked files.** Git never ignores a file it is tracking, even when a pattern matches it. rsync has no notion of the index, so a committed file matching an ignore rule vanished from the copy — the worst failure mode for a backup tool.
+- Literal path metacharacters are escaped. An ignored file named `weird[1].txt` previously produced a character class that excluded `w1.txt` and left the actual file behind, so the exclude landed on the wrong file entirely.
+- Git-derived patterns are anchored to the transfer root, which in the default (nest) mode sits one level above the source. An unanchored pattern matches nothing there, so the exclude would have silently no-opped.
+- Sources reached through a symlink (`/tmp` → `/private/tmp` on macOS, many home-directory setups) are resolved before being related to the repo root. Without this the path mapping fails and the ignore set comes back empty, which reads as "nothing is ignored".
+
+### Added
+- Asking git also picks up `.git/info/exclude`, `core.excludesFile`, and nested `.gitignore` precedence, none of which the old approximation handled the same way.
+- `--show-excludes` lists the git-derived ignore set — the direct answer to "why didn't this file copy?".
+- The banner reports which mode ran: `on (via git)` or `on (approximate: rsync filter, no git repo)`.
+
+### Changed
+- Sources that are not a git work tree, or systems without `git`, fall back to the previous approximate filter rather than failing. The fallback is disclosed in the banner and in `--show-excludes`, since it changes which files transfer.
+- When an enclosing repo ignores the source directory itself, git has nothing to say about its contents. That is reported and everything is copied, rather than emitting a pattern that would exclude the entire transfer.
+
 ## [0.6.0]
 
 ### Added

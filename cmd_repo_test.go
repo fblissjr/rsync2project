@@ -12,11 +12,11 @@ func TestResolveRepoConfigArg(t *testing.T) {
 	base := "/tmp/xdg/rsync2project/repos"
 
 	cases := map[string]string{
-		"myapp":                     filepath.Join(base, "myapp.conf"),
-		"myapp.conf":                filepath.Join(base, "myapp.conf"),
-		"/Users/fred/code/myapp":    filepath.Join(base, "myapp.conf"),
-		"/Users/fred/code/myapp/":   filepath.Join(base, "myapp.conf"),
-		"./myapp":                   filepath.Join(base, "myapp.conf"),
+		"myapp":                   filepath.Join(base, "myapp.conf"),
+		"myapp.conf":              filepath.Join(base, "myapp.conf"),
+		"/Users/fred/code/myapp":  filepath.Join(base, "myapp.conf"),
+		"/Users/fred/code/myapp/": filepath.Join(base, "myapp.conf"),
+		"./myapp":                 filepath.Join(base, "myapp.conf"),
 	}
 	for in, want := range cases {
 		if got := resolveRepoConfigArg(in); got != want {

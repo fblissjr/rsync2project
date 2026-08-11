@@ -8,8 +8,17 @@ import (
 	"strings"
 )
 
+// gitignoreFilter tells runRsync how to honor .gitignore: with the exact
+// path set git computed, or with rsync's approximate dir-merge when git
+// couldn't answer. See loadGitIgnoreSet for why the two differ.
+type gitignoreFilter struct {
+	enabled  bool
+	fromGit  bool
+	excludes []string
+}
+
 // runRsync builds the rsync argv and execs it, streaming stdio to the user.
-func runRsync(source, destination string, includes, excludes []string, opts *options) error {
+func runRsync(source, destination string, includes, excludes []string, gf gitignoreFilter, opts *options) error {
 	if _, err := exec.LookPath("rsync"); err != nil {
 		return fmt.Errorf("rsync not found on PATH; please install rsync")
 	}
@@ -51,7 +60,21 @@ func runRsync(source, destination string, includes, excludes []string, opts *opt
 	for _, i := range includes {
 		args = append(args, "--include="+i)
 	}
-	if !opts.noGitignore {
+	// Same slot the dir-merge filter always occupied: after --include (which
+	// must keep winning) and before the baseline excludes.
+	switch {
+	case !gf.enabled:
+		// nothing
+	case gf.fromGit:
+		if len(gf.excludes) > 0 {
+			path, cleanup, err := writeTempPatternFile(gf.excludes)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			args = append(args, "--exclude-from="+path)
+		}
+	default:
 		args = append(args, "--filter=:- .gitignore")
 	}
 	if looksRemote(destination) {

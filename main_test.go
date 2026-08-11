@@ -170,6 +170,50 @@ func TestBuildExcludeListNoExcludes(t *testing.T) {
 	}
 }
 
+func TestEscapeRsyncPattern(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"models/weights.bin", "models/weights.bin"},
+		// Without escaping, "[1]" is a character class: the pattern would
+		// miss this file and exclude "w1.txt" instead. Escaping the opening
+		// bracket is sufficient — with no class open, "]" is already
+		// literal (verified against rsync 3.4.4).
+		{"weird[1].txt", `weird\[1].txt`},
+		{"star*.log", `star\*.log`},
+		{"what?.txt", `what\?.txt`},
+		{`back\slash`, `back\\slash`},
+	}
+	for _, c := range cases {
+		if got := escapeRsyncPattern(c.in); got != c.want {
+			t.Errorf("escapeRsyncPattern(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestGitIgnoreSetRsyncExcludes(t *testing.T) {
+	set := gitIgnoreSet{ok: true, paths: []string{"build/", "logs/app.log"}}
+
+	// Nest mode: the transfer root is one level above the source, so every
+	// pattern needs the source basename or it silently matches nothing.
+	nest := set.rsyncExcludes("/src/myapp", false)
+	want := []string{"/myapp/build/", "/myapp/logs/app.log"}
+	if !slices.Equal(nest, want) {
+		t.Errorf("nest excludes = %v, want %v", nest, want)
+	}
+
+	// --contents: the source's contents are the root.
+	contents := set.rsyncExcludes("/src/myapp", true)
+	want = []string{"/build/", "/logs/app.log"}
+	if !slices.Equal(contents, want) {
+		t.Errorf("contents excludes = %v, want %v", contents, want)
+	}
+
+	// A source basename containing a metacharacter must not become a glob.
+	odd := gitIgnoreSet{ok: true, paths: []string{"x"}}.rsyncExcludes("/src/app[1]", false)
+	if !slices.Equal(odd, []string{`/app\[1]/x`}) {
+		t.Errorf("metachar basename not escaped: %v", odd)
+	}
+}
+
 func TestDedupe(t *testing.T) {
 	got := dedupe([]string{"a", "b", "a", "c", "b"})
 	want := []string{"a", "b", "c"}
