@@ -262,6 +262,78 @@ func TestParseKVFileMissing(t *testing.T) {
 	}
 }
 
+func TestParseArgsInterspersed(t *testing.T) {
+	// Trailing boolean flags after source and destination must be honored
+	// instead of silently becoming extra positional arguments.
+	opts, args, stop, _ := parseArgs([]string{"data", "user@host:/srv/app", "--no-gitignore", "--no-excludes"})
+	if stop {
+		t.Fatal("unexpected stop")
+	}
+	if !opts.noGitignore || !opts.noExcludes {
+		t.Errorf("expected noGitignore and noExcludes true, got %+v", opts)
+	}
+	if !slices.Equal(args, []string{"data", "user@host:/srv/app"}) {
+		t.Errorf("args = %v, want [data user@host:/srv/app]", args)
+	}
+
+	// Trailing --all expands into both noGitignore and noExcludes.
+	optsAll, argsAll, stop, _ := parseArgs([]string{"data", "user@host:/srv/app", "--all"})
+	if stop {
+		t.Fatal("unexpected stop")
+	}
+	if !optsAll.all || !optsAll.noGitignore || !optsAll.noExcludes {
+		t.Errorf("expected --all to set noGitignore and noExcludes, got %+v", optsAll)
+	}
+	if !slices.Equal(argsAll, []string{"data", "user@host:/srv/app"}) {
+		t.Errorf("args = %v, want [data user@host:/srv/app]", argsAll)
+	}
+
+	// Value-taking flags (both space-separated and = form) interspersed with positionals.
+	optsVal, argsVal, stop, _ := parseArgs([]string{
+		"data", "--dest", "mac", "--include", "models/", "--extra=*.tmp", "-n",
+	})
+	if stop {
+		t.Fatal("unexpected stop")
+	}
+	if optsVal.destName != "mac" || !optsVal.dryRun {
+		t.Errorf("unexpected opts: %+v", optsVal)
+	}
+	if !slices.Equal([]string(optsVal.extraIncludes), []string{"models/"}) {
+		t.Errorf("extraIncludes = %v, want [models/]", optsVal.extraIncludes)
+	}
+	if !slices.Equal([]string(optsVal.extraExcludes), []string{"*.tmp"}) {
+		t.Errorf("extraExcludes = %v, want [*.tmp]", optsVal.extraExcludes)
+	}
+	if !slices.Equal(argsVal, []string{"data"}) {
+		t.Errorf("args = %v, want [data]", argsVal)
+	}
+
+	// "--" stops flag parsing so dash-prefixed paths survive as positionals.
+	optsDash, argsDash, stop, _ := parseArgs([]string{"--all", "--", "-weird-src", "--no-vcs"})
+	if stop {
+		t.Fatal("unexpected stop")
+	}
+	if !optsDash.all || optsDash.excludeVCS {
+		t.Errorf("unexpected opts across --: %+v", optsDash)
+	}
+	if !slices.Equal(argsDash, []string{"-weird-src", "--no-vcs"}) {
+		t.Errorf("args = %v, want [-weird-src --no-vcs]", argsDash)
+	}
+
+	// A trailing value-taking flag missing its argument must error rather than
+	// consuming an earlier positional argument.
+	if _, _, stop, code := parseArgs([]string{"data", "--dest"}); !stop || code != 2 {
+		t.Errorf("expected stop=true code=2 for dangling --dest, got stop=%v code=%d", stop, code)
+	}
+}
+
+func TestResolveDestRejectsExtraArgs(t *testing.T) {
+	_, err := resolveDest(&options{}, []string{"src", "dst", "extra"}, "")
+	if err == nil {
+		t.Fatal("expected error for extra positional argument, got nil")
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

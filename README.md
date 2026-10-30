@@ -18,14 +18,17 @@ Or `go build -o rsync2project .` and drop the binary on your `PATH`.
 
 ## Usage
 
-    rsync2project <source> <destination>
-    rsync2project --dest NAME <source>
+    rsync2project [options] <source> <destination>
+    rsync2project <source> <destination> [options]
+    rsync2project [options] --dest NAME <source>
     rsync2project -n --show-excludes <source>
 
-Flags: `-n`, `-v`, `-q/--quiet`, `--delete`, `--no-gitignore`,
+Flags (`-n`, `-v`, `-q/--quiet`, `--delete`, `--no-gitignore`,
 `--no-excludes`, `--all`, `--no-vcs`, `--show-excludes`,
 `--extra PATTERN`, `--include PATTERN`, `--save-config`,
-`-d/--dest NAME`, `--contents`, `--list-dests`, `--version`.
+`-d/--dest NAME`, `--contents`, `--list-dests`, `--version`) can appear
+anywhere on the command line — before, between, or after `<source>` and
+`<destination>`. Use `--` if a path starts with `-`.
 
 Subcommands: `dest`, `repo`, `config path` — see sections below or
 `rsync2project <subcmd> --help`.

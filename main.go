@@ -52,7 +52,10 @@ func main() {
 		}
 	}
 
-	opts := parseFlags()
+	opts, args, stop, code := parseArgs(os.Args[1:])
+	if stop {
+		os.Exit(code)
+	}
 
 	if opts.showVersion {
 		fmt.Println("rsync2project", version)
@@ -65,10 +68,12 @@ func main() {
 		return
 	}
 
-	args := flag.Args()
 	if len(args) < 1 {
-		flag.Usage()
+		usage()
 		os.Exit(2)
+	}
+	if len(args) > 2 {
+		fail(fmt.Errorf("unexpected extra argument %q (usage: rsync2project [options] <source> [destination])", args[2]))
 	}
 	source := args[0]
 
@@ -251,32 +256,36 @@ func warnNestCollision(source, destination string, opts *options) {
 		base, effectiveDest(source, destination, false), strings.TrimRight(destination, "/"))
 }
 
-func parseFlags() *options {
-	opts := &options{}
+func parseArgs(rawArgs []string) (opts *options, args []string, stop bool, exitCode int) {
+	opts = &options{}
+	fs := flag.NewFlagSet("rsync2project", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 
-	flag.BoolVar(&opts.dryRun, "dry-run", false, "show what would be transferred without copying")
-	flag.BoolVar(&opts.dryRun, "n", false, "")
-	flag.BoolVar(&opts.verbose, "verbose", false, "verbose rsync output; also prints the invoked command")
-	flag.BoolVar(&opts.verbose, "v", false, "")
-	flag.BoolVar(&opts.quiet, "quiet", false, "progress bar only, no per-file list (the pre-0.6 default)")
-	flag.BoolVar(&opts.quiet, "q", false, "")
-	flag.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
-	flag.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
-	flag.BoolVar(&opts.noExcludes, "no-excludes", false, "don't apply the builtin/project-type/user exclude lists")
-	flag.BoolVar(&opts.all, "all", false, "copy everything: implies --no-gitignore and --no-excludes")
-	flag.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
-	flag.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
-	flag.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to ~/.config/rsync2project/repos/<basename>.conf for reuse")
-	flag.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
-	flag.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
-	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
-	flag.StringVar(&opts.destName, "dest", "", "named destination from ~/.config/rsync2project/destinations")
-	flag.StringVar(&opts.destName, "d", "", "")
-	flag.Var(&opts.extraExcludes, "extra", "additional exclude pattern (repeatable)")
-	flag.Var(&opts.extraIncludes, "include", "include pattern that overrides .gitignore/excludes (repeatable)")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "show what would be transferred without copying")
+	fs.BoolVar(&opts.dryRun, "n", false, "")
+	fs.BoolVar(&opts.verbose, "verbose", false, "verbose rsync output; also prints the invoked command")
+	fs.BoolVar(&opts.verbose, "v", false, "")
+	fs.BoolVar(&opts.quiet, "quiet", false, "progress bar only, no per-file list (the pre-0.6 default)")
+	fs.BoolVar(&opts.quiet, "q", false, "")
+	fs.BoolVar(&opts.deleteExtras, "delete", false, "delete files on destination not present on source")
+	fs.BoolVar(&opts.noGitignore, "no-gitignore", false, "don't use .gitignore as an rsync filter")
+	fs.BoolVar(&opts.noExcludes, "no-excludes", false, "don't apply the builtin/project-type/user exclude lists")
+	fs.BoolVar(&opts.all, "all", false, "copy everything: implies --no-gitignore and --no-excludes")
+	fs.BoolVar(&opts.excludeVCS, "no-vcs", false, "exclude .git/.hg/.svn metadata")
+	fs.BoolVar(&opts.contents, "contents", false, "copy source contents directly into destination instead of nesting under source name")
+	fs.BoolVar(&opts.saveConfig, "save-config", false, "write current --dest and --include flags to ~/.config/rsync2project/repos/<basename>.conf for reuse")
+	fs.BoolVar(&opts.showExcludes, "show-excludes", false, "print exclude list and exit")
+	fs.BoolVar(&opts.listDests, "list-dests", false, "list named destinations and exit")
+	fs.BoolVar(&opts.showVersion, "version", false, "print version and exit")
+	fs.StringVar(&opts.destName, "dest", "", "named destination from ~/.config/rsync2project/destinations")
+	fs.StringVar(&opts.destName, "d", "", "")
+	fs.Var(&opts.extraExcludes, "extra", "additional exclude pattern (repeatable)")
+	fs.Var(&opts.extraIncludes, "include", "include pattern that overrides .gitignore/excludes (repeatable)")
 
-	flag.Usage = usage
-	flag.Parse()
+	fs.Usage = usage
+	if stop, code := parseSubFlags(fs, rawArgs); stop {
+		return nil, nil, true, code
+	}
 
 	// --all is pure sugar over the two precise flags, resolved here so
 	// every downstream consumer (including --show-excludes) sees a single
@@ -285,7 +294,7 @@ func parseFlags() *options {
 		opts.noGitignore = true
 		opts.noExcludes = true
 	}
-	return opts
+	return opts, fs.Args(), false, 0
 }
 
 // resolveDest picks a destination using priority: explicit --dest, explicit
@@ -294,13 +303,16 @@ func parseFlags() *options {
 // repo default exists precisely to be overridable. Only --dest + positional
 // is a real conflict.
 func resolveDest(opts *options, args []string, repoDefault string) (string, error) {
+	if len(args) > 2 {
+		return "", fmt.Errorf("unexpected extra argument %q (usage: rsync2project [options] <source> [destination])", args[2])
+	}
 	if opts.destName != "" && len(args) > 1 {
 		return "", fmt.Errorf("cannot supply both --dest and a positional destination")
 	}
 	if opts.destName != "" {
 		return resolveDestination(opts.destName)
 	}
-	if len(args) >= 2 {
+	if len(args) == 2 {
 		return args[1], nil
 	}
 	if repoDefault != "" {
